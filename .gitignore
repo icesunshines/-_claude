@@ -1,0 +1,48 @@
+# Dependencies
+frontend/node_modules/
+backend/venv/
+venv/
+.env
+.env.local
+.env.*.local
+
+# Database
+medical.db
+*.db
+
+# Build outputs
+frontend/dist/
+frontend/.vite/
+docs/thesis_figures/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude
+.claude/
+
+# Git
+.git/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+
+# Row data and duplicates
+RowData/
+项目/
