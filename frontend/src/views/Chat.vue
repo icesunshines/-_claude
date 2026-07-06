@@ -306,8 +306,8 @@ async function deleteSession(sessionId) {
 <template>
   <div class="chat-page flex gap-0">
     <!-- 左侧会话列表 -->
-    <div v-if="showSidebar" class="sidebar w-64 bg-slate-50 border-r border-slate-200 flex flex-col min-h-0">
-      <div class="p-4 border-b border-slate-200">
+    <div v-if="showSidebar" class="sidebar w-64 bg-white border-r border-slate-100 flex flex-col min-h-0">
+      <div class="p-4 border-b border-slate-100">
         <button @click="createNewSession" class="w-full btn-primary flex items-center justify-center gap-2">
           <el-icon><Document /></el-icon>
           <span>新对话</span>
@@ -318,8 +318,8 @@ async function deleteSession(sessionId) {
           v-for="session in sessions"
           :key="session.id"
           @click="loadSession(session.id)"
-          class="session-item p-3 rounded-lg cursor-pointer mb-2 hover:bg-white transition-colors"
-          :class="currentSessionId === session.id ? 'bg-white border border-primary-200' : 'border border-transparent'"
+          class="session-item p-3 rounded-lg cursor-pointer mb-2 hover:bg-slate-50 transition-colors"
+          :class="currentSessionId === session.id ? 'bg-white border-slate-100 shadow-soft' : 'hover:bg-slate-50 border border-transparent'"
         >
           <div class="flex items-center justify-between">
             <div class="flex-1 min-w-0">
@@ -485,10 +485,6 @@ async function deleteSession(sessionId) {
   min-width: 260px;
   height: 100%;
   border-radius: 0;
-}
-
-.session-item:hover {
-  background-color: #f8fafc;
 }
 
 .message-content :deep(p) {
