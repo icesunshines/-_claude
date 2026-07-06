@@ -352,10 +352,20 @@ async function deleteSession(sessionId) {
 
         <!-- 快捷问题标签 -->
         <div class="bg-white px-4 py-2 border-b border-slate-100 flex-shrink-0">
-          <div class="flex flex-wrap gap-2" :class="messages.length === 0 ? '' : 'max-h-[40px] overflow-hidden transition-all duration-300'">
-            <template v-if="showAllQuickQuestions || messages.length === 0">
+          <div class="flex flex-wrap gap-2" :class="showAllQuickQuestions || messages.length === 0 ? '' : 'max-h-[40px] overflow-hidden transition-all duration-300'">
+            <!-- 前 3 个始终显示 -->
+            <button
+              v-for="q in quickQuestions.slice(0, 3)"
+              :key="q"
+              @click="quickQuestion(q)"
+              class="px-3 py-1.5 bg-white border border-primary-200 text-primary-700 rounded-full hover:bg-primary-50 hover:border-primary-300 transition-all text-xs whitespace-nowrap"
+            >
+              {{ q }}
+            </button>
+            <!-- 剩余标签：仅在 showAllQuickQuestions 为 true 时显示 -->
+            <template v-if="showAllQuickQuestions">
               <button
-                v-for="q in quickQuestions"
+                v-for="q in quickQuestions.slice(3)"
                 :key="q"
                 @click="quickQuestion(q)"
                 class="px-3 py-1.5 bg-white border border-primary-200 text-primary-700 rounded-full hover:bg-primary-50 hover:border-primary-300 transition-all text-xs whitespace-nowrap"
@@ -363,8 +373,9 @@ async function deleteSession(sessionId) {
                 {{ q }}
               </button>
             </template>
+            <!-- 更多/收起按钮 -->
             <button
-              v-if="messages.length > 0 && quickQuestions.length > 3"
+              v-if="quickQuestions.length > 3"
               @click="showAllQuickQuestions = !showAllQuickQuestions"
               class="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 rounded-full hover:bg-slate-50 hover:border-slate-300 transition-all text-xs whitespace-nowrap"
             >
