@@ -1,7 +1,7 @@
 <script setup>
 import { ref, nextTick, onMounted } from 'vue'
 import { chat } from '../api/request'
-import { ChatDotRound, Promotion, User, Refresh, MagicStick, Document, Menu, Close } from '@element-plus/icons-vue'
+import { ChatDotRound, Promotion, User, Refresh, Document, Menu, Close } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 
@@ -112,18 +112,15 @@ async function createNewSession() {
   creatingSession.value = true
   try {
     await loadSessions()
-    console.log('[Chat] createNewSession, sessions:', sessions.value.map(s => s.title))
 
     // 优先复用已有的空白"新对话"
     const blankSession = sessions.value.find(s => s.title === '新对话')
-    console.log('[Chat] blankSession:', blankSession)
     if (blankSession) {
       // 如果当前已经是这个空白会话且无消息，直接返回
       if (currentSessionId.value === blankSession.id && messages.value.length === 0) {
         return
       }
       // 尝试加载这个空白会话，如果失败则创建新的
-      const prevSessionId = currentSessionId.value
       await loadSession(blankSession.id)
       // loadSession 失败时 currentSessionId 不会变，需要创建新的
       if (!currentSessionId.value) {
@@ -156,7 +153,6 @@ async function sendMessage() {
 
   // 确保有当前会话
   if (!currentSessionId.value) {
-    console.log('[Chat] 当前无会话，开始创建...')
     await createNewSession()
     // 如果创建/加载仍然失败，不再发送
     if (!currentSessionId.value) {
@@ -165,7 +161,6 @@ async function sendMessage() {
     }
   }
 
-  console.log('[Chat] 发送消息, session_id:', currentSessionId.value)
   const userMessageText = input.value.trim()
   input.value = ''
 
@@ -340,37 +335,55 @@ async function deleteSession(sessionId) {
 
     <!-- 右侧聊天区域 -->
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <div class="p-0 overflow-hidden flex flex-col min-h-0 flex-1 bg-white rounded-lg">
-        <div class="bg-gradient-to-r from-primary-500 to-medical-500 p-4 text-white flex items-center justify-between flex-shrink-0">
+      <div class="flex flex-col min-h-0 flex-1 bg-white">
+        <!-- 顶部标题栏 -->
+        <div class="bg-white px-4 py-2.5 flex items-center justify-between border-b border-slate-100 flex-shrink-0">
           <div class="flex items-center gap-3">
-            <button @click="showSidebar = !showSidebar" class="hover:bg-white/20 p-2 rounded-lg transition-colors">
-              <el-icon :size="20"><Menu /></el-icon>
+            <button @click="showSidebar = !showSidebar" class="hover:bg-slate-100 p-2 rounded-lg transition-colors">
+              <el-icon :size="18" class="text-slate-600"><Menu /></el-icon>
             </button>
             <div>
-              <h2 class="text-xl font-bold">智能健康助手</h2>
-              <p class="text-white/80 text-sm">为您提供健康咨询服务</p>
+              <h2 class="text-base font-bold text-slate-800 leading-tight">智能健康助手</h2>
+              <p class="text-xs text-slate-400 leading-tight">基于大模型医疗知识库</p>
             </div>
           </div>
         </div>
 
-        <div class="bg-slate-50 p-3 border-b border-slate-200 flex-shrink-0">
-          <div class="flex flex-wrap gap-2">
+        <!-- 快捷问题条 -->
+        <div class="bg-slate-50/80 px-3 py-2 border-b border-slate-200 flex-shrink-0">
+          <div class="flex flex-wrap gap-1.5">
             <button
               v-for="q in quickQuestions"
               :key="q"
               @click="quickQuestion(q)"
-              class="px-3 py-1.5 bg-white border border-primary-200 text-primary-700 rounded-lg hover:bg-primary-50 hover:border-primary-300 transition-all duration-300 text-sm"
+              class="px-2.5 py-1 bg-white border border-primary-200 text-primary-700 rounded-md hover:bg-primary-50 hover:border-primary-300 transition-all text-xs"
             >
               {{ q }}
             </button>
           </div>
         </div>
 
+        <!-- 消息区 -->
         <div
           ref="messagesContainer"
-          class="messages-container flex-1 overflow-y-auto p-4"
+          class="messages-container flex-1 overflow-y-auto px-3 py-3 bg-slate-50/50 min-h-0"
         >
-          <div class="space-y-3">
+          <!-- 空状态占位 -->
+          <div v-if="!messages.length && !loading" class="h-full min-h-0 flex items-center justify-center">
+            <div class="text-center text-slate-400">
+              <div class="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <el-icon :size="32" class="text-primary-400">
+                  <ChatDotRound />
+                </el-icon>
+              </div>
+              <p class="text-base font-medium text-slate-600 mb-1">开始对话</p>
+              <p class="text-xs text-slate-400 max-w-xs leading-relaxed">
+                请选择左侧会话或直接提问，<br/>我将基于医疗知识库为您解答健康问题。
+              </p>
+            </div>
+          </div>
+
+          <div v-if="messages.length" class="space-y-2.5">
             <div
               v-for="msg in messages"
               :key="msg.id"
@@ -378,24 +391,24 @@ async function deleteSession(sessionId) {
               :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
             >
               <div
-                class="message-bubble max-w-[70%]"
+                class="message-bubble max-w-[75%]"
                 :class="msg.role === 'user'
                   ? 'bg-gradient-to-r from-primary-500 to-medical-500 text-white rounded-xl rounded-tr-sm'
                   : 'bg-white border border-slate-200 text-slate-800 rounded-xl rounded-tl-sm'"
               >
-                <div class="flex items-start gap-3">
+                <div class="flex items-start gap-2">
                   <div
-                    class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                    class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0"
                     :class="msg.role === 'user' ? 'bg-primary-600' : 'bg-slate-100'"
                   >
-                    <el-icon :size="16" :class="msg.role === 'user' ? 'text-white' : 'text-primary-600'">
+                    <el-icon :size="14" :class="msg.role === 'user' ? 'text-white' : 'text-primary-600'">
                       <User v-if="msg.role === 'user'" />
                       <ChatDotRound v-else />
                     </el-icon>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <div class="message-content" v-html="msg.html"></div>
-                    <div class="text-xs mt-1 opacity-70">
+                    <div class="message-content text-[13px] leading-relaxed" v-html="msg.html"></div>
+                    <div class="text-[11px] mt-1 opacity-60">
                       {{ msg.timestamp }}
                     </div>
                   </div>
@@ -404,32 +417,33 @@ async function deleteSession(sessionId) {
             </div>
 
             <div v-if="loading" class="flex justify-start">
-              <div class="bg-white border border-slate-200 text-slate-800 rounded-xl rounded-tl-sm p-3 flex items-center gap-2">
-                <el-icon class="animate-spin text-primary-600" :size="18">
+              <div class="bg-white border border-slate-200 text-slate-800 rounded-xl rounded-tl-sm px-3 py-2 flex items-center gap-2">
+                <el-icon class="animate-spin text-primary-600" :size="16">
                   <Refresh />
                 </el-icon>
-                <span class="text-slate-500 text-sm">正在思考...</span>
+                <span class="text-slate-500 text-xs">正在思考...</span>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="border-t border-slate-200 p-3 bg-slate-50 flex-shrink-0">
-          <div class="flex gap-3">
+        <!-- 输入区 -->
+        <div class="border-t border-slate-200 px-3 py-2.5 bg-white flex-shrink-0">
+          <div class="flex gap-2">
             <input
               v-model="input"
               @keyup.enter="sendMessage"
               type="text"
               :disabled="loading"
-              placeholder="请输入您的问题..."
-              class="input-field flex-1 text-base py-3 px-4"
+              placeholder="请输入健康问题..."
+              class="input-field flex-1 text-sm py-2.5 px-3"
             />
             <button
               @click="sendMessage"
               :disabled="loading"
-              class="btn-primary px-6 flex items-center gap-2"
+              class="btn-primary px-4 flex items-center gap-1.5 text-sm py-2.5"
             >
-              <el-icon :size="18"><Promotion /></el-icon>
+              <el-icon :size="16"><Promotion /></el-icon>
               <span>发送</span>
             </button>
           </div>
@@ -441,13 +455,16 @@ async function deleteSession(sessionId) {
 
 <style scoped>
 .chat-page {
-  max-width: 1600px;
-  margin: 0 auto;
-  min-height: 0;
-  flex: 1;
+  display: flex;
+  height: calc(100vh - 56px);
+  width: 100%;
+  overflow: hidden;
 }
 
 .sidebar {
+  width: 260px;
+  min-width: 260px;
+  height: 100%;
   border-radius: 0;
 }
 
