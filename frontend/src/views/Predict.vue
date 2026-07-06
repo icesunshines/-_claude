@@ -85,6 +85,28 @@ const bsGroups = [
   { title: '白细胞分类', fields: ['中性粒细胞百分比', '淋巴细胞百分比', '单核细胞百分比', '嗜酸细胞百分比', '嗜碱细胞百分比'] }
 ]
 
+const bsInterpretation = {
+  '正常': '当前血糖水平处于正常范围。建议保持健康饮食和规律运动，每年定期体检监测血糖变化。',
+  '偏高': '血糖略高于正常范围，提示糖耐量受损可能。建议减少高糖高脂饮食，增加运动量，3-6 个月后复查空腹血糖和糖化血红蛋白。',
+  '高风险': '血糖显著升高，提示糖尿病可能。请尽快就医，进行空腹血糖、糖化血红蛋白及 OGTT 检查，明确诊断并在医生指导下治疗。'
+}
+
+const dmInterpretation = {
+  '低风险': '当前妊娠期糖尿病风险较低。继续保持均衡饮食和适度运动，按医嘱完成孕期糖筛即可。',
+  '中风险': '存在一定妊娠期糖尿病风险。建议控制碳水化合物摄入，增加餐后活动，并咨询产科医生是否需要提前干预。',
+  '高风险': '妊娠期糖尿病风险较高。请尽快咨询产科医生，进行 OGTT 检查，必要时启动饮食控制或胰岛素治疗，保障母婴安全。'
+}
+
+function getBsInterpretation(riskLevel) {
+  return bsInterpretation[riskLevel] || '建议结合临床指标综合评估，必要时咨询医生。'
+}
+
+function getDmInterpretation(probability) {
+  if (probability < 0.3) return dmInterpretation['低风险']
+  if (probability < 0.7) return dmInterpretation['中风险']
+  return dmInterpretation['高风险']
+}
+
 const dmFields = [
   { key: '年龄', label: '年龄' },
   { key: '孕次', label: '孕次' },
@@ -510,6 +532,17 @@ function resetDiabetesForm() {
                 </p>
               </div>
             </div>
+
+            <div class="bg-slate-50 rounded-xl p-4 border border-slate-100">
+              <div class="flex items-start gap-3">
+                <el-icon class="text-medical-600 mt-1" :size="20">
+                  <CircleCheck />
+                </el-icon>
+                <p class="text-slate-600 leading-relaxed text-sm">
+                  {{ getBsInterpretation(bsResult.risk_level) }}
+                </p>
+              </div>
+            </div>
           </div>
 
           <!-- 特征解释 tab -->
@@ -647,6 +680,17 @@ function resetDiabetesForm() {
                 </el-icon>
                 <p class="text-slate-600 leading-relaxed text-sm">
                   建议咨询医生，进行进一步的检查和干预。
+                </p>
+              </div>
+            </div>
+
+            <div class="bg-slate-50 rounded-xl p-4 border border-slate-100">
+              <div class="flex items-start gap-3">
+                <el-icon class="text-medical-600 mt-1" :size="20">
+                  <CircleCheck />
+                </el-icon>
+                <p class="text-slate-600 leading-relaxed text-sm">
+                  {{ getDmInterpretation(dmResult.probability) }}
                 </p>
               </div>
             </div>

@@ -1,8 +1,8 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { getAdminStats } from '../api/request'
-import { User, Document, DataLine, CircleCheck, Calendar, FirstAidKit, Setting, TrendCharts, Refresh } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { User, Document, DataLine, CircleCheck, Calendar, FirstAidKit, Setting, TrendCharts, Refresh, Delete, SwitchButton } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const stats = ref(null)
 const history = ref([])
@@ -39,7 +39,53 @@ function formatDate(dateStr) {
     return dateStr
   }
 }
-</script>
+
+async function handleDeleteUser(user) {
+  try {
+    await ElMessageBox.confirm(`确定删除用户 "${user.username}" 吗？相关数据将被一并删除。`, '删除用户', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await fetch(`/api/admin/users/${user.id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+    ElMessage.success('删除成功')
+    await loadData()
+  } catch (e) {
+    if (e !== 'cancel') {
+      console.error('删除用户失败:', e)
+      ElMessage.error('删除失败')
+    }
+  }
+}
+
+async function handleToggleRole(user) {
+  const newRole = user.role === 'admin' ? 'user' : 'admin'
+  try {
+    await ElMessageBox.confirm(`确定将用户 "${user.username}" 的角色改为 ${newRole === 'admin' ? '管理员' : '普通用户'} 吗？`, '修改角色', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'info'
+    })
+    await fetch(`/api/admin/users/${user.id}/role`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
+      },
+      body: JSON.stringify({ role: newRole })
+    })
+    ElMessage.success('角色已更新')
+    await loadData()
+  } catch (e) {
+    if (e !== 'cancel') {
+      console.error('修改角色失败:', e)
+      ElMessage.error('修改失败')
+    }
+  }
+}
 
 <template>
   <div class="admin-page max-w-6xl mx-auto">
@@ -183,6 +229,16 @@ function formatDate(dateStr) {
                 </td>
                 <td class="py-5 px-4 text-sm text-slate-800 font-semibold">{{ user.prediction_count }}</td>
                 <td class="py-5 px-4 text-sm text-slate-500">{{ formatDate(user.created_at) }}</td>
+                <td class="py-5 px-4">
+                  <div class="flex items-center gap-2">
+                    <button @click="handleToggleRole(user)" class="p-2 rounded-lg hover:bg-primary-50 text-primary-600" title="切换角色">
+                      <el-icon :size="18"><SwitchButton /></el-icon>
+                    </button>
+                    <button @click="handleDeleteUser(user)" class="p-2 rounded-lg hover:bg-red-50 text-red-500" title="删除用户">
+                      <el-icon :size="18"><Delete /></el-icon>
+                    </button>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>

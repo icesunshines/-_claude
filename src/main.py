@@ -329,6 +329,50 @@ def admin_get_history(
     ]
 
 
+@app.delete('/api/admin/users/{user_id}')
+def admin_delete_user(
+    user_id: int,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """管理员删除用户及其相关数据"""
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail='不能删除当前登录的管理员账号')
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail='用户不存在')
+    db.query(PredictionHistory).filter(PredictionHistory.user_id == user_id).delete(synchronize_session=False)
+    db.query(ChatMessage).filter(ChatMessage.session_id.in_(
+        db.query(ChatSession.id).filter(ChatSession.user_id == user_id)
+    )).delete(synchronize_session=False)
+    db.query(ChatSession).filter(ChatSession.user_id == user_id).delete(synchronize_session=False)
+    db.delete(user)
+    db.commit()
+    return {'status': 'ok', 'message': f'用户 {user.username} 已删除'}
+
+
+@app.patch('/api/admin/users/{user_id}/role')
+def admin_update_user_role(
+    user_id: int,
+    request: Dict[str, Any],
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """管理员修改用户角色"""
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail='不能修改当前登录管理员的角色')
+    new_role = request.get('role')
+    if new_role not in ('user', 'admin'):
+        raise HTTPException(status_code=400, detail='角色只能是 user 或 admin')
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail='用户不存在')
+    user.role = new_role
+    db.add(user)
+    db.commit()
+    return {'status': 'ok', 'message': f'用户 {user.username} 角色已更新为 {new_role}'}
+
+
 # ==================== 实时推送 ====================
 
 async def event_generator(db: Session):

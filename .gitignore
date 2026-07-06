@@ -10,6 +10,10 @@ venv/
 medical.db
 *.db
 
+# ML model artifacts
+src/models/*.lgb
+src/models/*.joblib
+
 # Build outputs
 frontend/dist/
 frontend/.vite/

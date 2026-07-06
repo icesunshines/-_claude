@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { getStatsOverview, getBloodSugarStats } from '../api/request'
+import { getStatsOverview, getBloodSugarStats, getHistory } from '../api/request'
 import { DataBoard, Timer, Refresh, DataAnalysis, Monitor } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import AgeTrendChart from '../components/Charts/AgeTrendChart.vue'
@@ -23,13 +23,8 @@ const stats = ref([
   { label: '模型 AUC', value: '0.0', icon: '🏆', color: 'warning', animateValue: 0, trend: 'up', trendValue: 3 }
 ])
 
-const recentRecords = ref([
-  { id: 1, type: '血糖预测', user: '张三', time: '2分钟前', result: '5.2 mmol/L' },
-  { id: 2, type: '糖尿病预测', user: '李四', time: '15分钟前', result: '低风险' },
-  { id: 3, type: '血糖预测', user: '王五', time: '30分钟前', result: '4.9 mmol/L' },
-  { id: 4, type: '糖尿病预测', user: '赵六', time: '1小时前', result: '中风险' },
-  { id: 5, type: '血糖预测', user: '钱七', time: '2小时前', result: '5.8 mmol/L' }
-])
+const recentRecords = ref([])
+let historyLoaded = false
 
 let realTimeInterval = null
 
@@ -64,9 +59,10 @@ function updateRealTimeStats() {
 
 async function loadData() {
   try {
-    const [overviewData, bsData] = await Promise.all([
+    const [overviewData, bsData, historyData] = await Promise.all([
       getStatsOverview(),
-      getBloodSugarStats()
+      getBloodSugarStats(),
+      getHistory()
     ])
 
     overview.value = overviewData
@@ -78,6 +74,14 @@ async function loadData() {
     stats.value[3].value = (overviewData.diabetes_metrics?.auc || 0).toFixed(2)
 
     animateNumber(overviewData.sample_count_initial || 0)
+    historyLoaded = true
+    recentRecords.value = (historyData || []).slice(0, 5).map(item => ({
+      id: item.id || item.created_at,
+      type: item.type === 'blood_sugar' ? '血糖预测' : '糖尿病预测',
+      time: formatTime(item.created_at),
+      result: formatResult(item.type, item.result),
+      riskLevel: item.type === 'blood_sugar' ? item.result?.risk_level : (item.result?.risk === 1 ? '高风险' : (item.result?.probability > 0.7 ? '高风险' : (item.result?.probability > 0.3 ? '中风险' : '低风险')))
+    }))
   } catch (e) {
     console.error('加载数据失败:', e)
   } finally {
@@ -136,6 +140,31 @@ const rightSummary = computed(() => {
   const elevatedPct = Math.round(elevated / total * 100)
   return `本次共分析 ${total} 份体检数据。正常血糖占比 ${normalPct}%（${normal} 人），偏高占比 ${elevatedPct}%（${elevated} 人），建议关注偏高人群进一步筛查。`
 })
+
+function formatTime(dateStr) {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diff = (now - date) / 1000
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function formatResult(type, result) {
+  if (!result) return '--'
+  if (type === 'blood_sugar') {
+    return result.predicted_bgl !== undefined ? `${result.predicted_bgl} mmol/L` : '--'
+  }
+  if (type === 'diabetes') {
+    if (result.risk === 1) return '高风险'
+    if (result.risk === 0) return '低风险'
+    if (result.probability !== undefined) return `${(result.probability * 100).toFixed(1)}%`
+    return '--'
+  }
+  return '--'
+}
 </script>
 
 <template>
@@ -275,7 +304,7 @@ const rightSummary = computed(() => {
 
         <div class="space-y-3 max-h-80 overflow-y-auto">
           <div
-            v-for="(record, idx) in recentRecords"
+            v-for="record in recentRecords"
             :key="record.id"
             class="p-4 bg-slate-50 rounded-xl border border-slate-100 hover:border-primary-200 transition-all duration-300"
           >
@@ -284,14 +313,17 @@ const rightSummary = computed(() => {
               <span class="text-xs text-slate-500">{{ record.time }}</span>
             </div>
             <div class="flex items-center justify-between">
-              <span class="text-sm text-slate-600">{{ record.user }}</span>
+              <span class="text-sm text-slate-600">我</span>
               <span class="text-sm font-bold" :class="
-                record.result.includes('低') ? 'text-success-600' :
-                record.result.includes('中') ? 'text-warning-600' :
-                record.result.includes('高') ? 'text-danger-600' :
+                record.riskLevel === '低风险' ? 'text-success-600' :
+                record.riskLevel === '中风险' ? 'text-warning-600' :
+                record.riskLevel === '高风险' ? 'text-danger-600' :
                 'text-primary-600'
               ">{{ record.result }}</span>
             </div>
+          </div>
+          <div v-if="!recentRecords.length && !loading" class="text-center text-slate-400 py-8 text-sm">
+            暂无预测记录，快去【风险预测】试试吧
           </div>
         </div>
       </div>
