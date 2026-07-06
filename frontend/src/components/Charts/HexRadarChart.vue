@@ -10,14 +10,15 @@ const props = defineProps({
 const chartRef = ref(null)
 let chart = null
 
-const indicators = [
-  { name: 'BMI', max: 40 },
-  { name: '空腹血糖', max: 15 },
-  { name: '血压', max: 200 },
-  { name: '年龄风险', max: 100 },
-  { name: '遗传风险', max: 100 },
-  { name: '运动水平', max: 100 }
-]
+const radarLabels = ['年龄', '孕前BMI', '收缩压', '舒张压', '糖筛孕周', '空腹血糖']
+const radarMax = {
+  '年龄': 100,
+  '孕前BMI': 50,
+  '收缩压': 200,
+  '舒张压': 120,
+  '糖筛孕周': 30,
+  '空腹血糖': 15
+}
 
 function initChart() {
   if (!chartRef.value) return
@@ -26,14 +27,35 @@ function initChart() {
   }
   chart = echarts.init(chartRef.value)
 
-  const data = props.overview ? [
-    Math.min((props.overview.mean_blood_sugar || 5.5) / 15 * 100, 100),
-    Math.min((props.overview.diabetes_metrics?.accuracy || 0.85) * 100, 100),
-    Math.min((props.overview.diabetes_metrics?.auc || 0.85) * 100, 100),
-    65,
-    70,
-    55
-  ] : [60, 70, 80, 65, 70, 55]
+  let healthyValues = []
+  let patientValues = []
+  let useFallback = false
+
+  if (props.overview && props.overview.radar_comparison) {
+    const radar = props.overview.radar_comparison
+    healthyValues = radarLabels.map(label => {
+      const val = radar[label]?.healthy_mean || 0
+      const maxVal = radarMax[label] || 100
+      return Math.min((val / maxVal) * 100, 100)
+    })
+    patientValues = radarLabels.map(label => {
+      const val = radar[label]?.patient_mean || 0
+      const maxVal = radarMax[label] || 100
+      return Math.min((val / maxVal) * 100, 100)
+    })
+  } else {
+    useFallback = true
+    healthyValues = [35, 24, 115, 75, 18, 5.0].map((v, i) => {
+      const label = radarLabels[i]
+      const maxVal = radarMax[label] || 100
+      return Math.min((v / maxVal) * 100, 100)
+    })
+    patientValues = [38, 28, 125, 82, 16, 6.5].map((v, i) => {
+      const label = radarLabels[i]
+      const maxVal = radarMax[label] || 100
+      return Math.min((v / maxVal) * 100, 100)
+    })
+  }
 
   const option = {
     tooltip: {
@@ -44,18 +66,34 @@ function initChart() {
       textStyle: { color: '#334155' },
       extraCssText: 'box-shadow: 0 4px 16px rgba(0,0,0,0.1); border-radius: 12px;',
       formatter: (params) => {
-        const value = typeof params.value === 'number' ? params.value : parseFloat(params.value)
-        return `<div style="padding: 4px 8px;">
-          <div style="font-weight: bold; margin-bottom: 4px;">${params.name}</div>
-          <div style="color: #8b5cf6;">得分：${Number.isFinite(value) ? value.toFixed(1) : '--'}</div>
-        </div>`
+        const idx = params.dataIndex
+        const label = radarLabels[idx]
+        const healthyVal = healthyValues[idx]
+        const patientVal = patientValues[idx]
+        if (params.seriesName === '健康群体') {
+          return `<div style="padding: 4px 8px;">
+            <div style="font-weight: bold; margin-bottom: 4px;">${label}</div>
+            <div style="color: #22c55e;">健康群体：${healthyVal.toFixed(1)}</div>
+          </div>`
+        } else {
+          return `<div style="padding: 4px 8px;">
+            <div style="font-weight: bold; margin-bottom: 4px;">${label}</div>
+            <div style="color: #ef4444;">患者群体：${patientVal.toFixed(1)}</div>
+          </div>`
+        }
       }
     },
+    legend: {
+      data: ['健康群体', '患者群体'],
+      bottom: '2%',
+      textStyle: { color: '#64748b', fontSize: 12 },
+      itemGap: 20
+    },
     radar: {
-      shape: 'hexagon',
+      shape: 'polygon',
       splitNumber: 4,
-      center: ['50%', '52%'],
-      radius: '72%',
+      center: ['50%', '48%'],
+      radius: '65%',
       axisName: {
         color: '#1e293b',
         fontSize: 13,
@@ -63,50 +101,50 @@ function initChart() {
       },
       splitLine: {
         lineStyle: {
-          color: 'rgba(100, 116, 139, 0.35)',
+          color: 'rgba(100, 116, 139, 0.25)',
           width: 1
         }
       },
       splitArea: {
         areaStyle: {
           color: [
-            'rgba(139, 92, 246, 0.08)',
-            'rgba(139, 92, 246, 0.14)',
-            'rgba(139, 92, 246, 0.08)',
-            'rgba(139, 92, 246, 0.14)'
+            'rgba(148, 163, 184, 0.06)',
+            'rgba(148, 163, 184, 0.12)',
+            'rgba(148, 163, 184, 0.06)',
+            'rgba(148, 163, 184, 0.12)'
           ]
         }
       },
       axisLine: {
         lineStyle: {
-          color: 'rgba(100, 116, 139, 0.6)'
+          color: 'rgba(100, 116, 139, 0.4)'
         }
       },
-      indicator: indicators
+      indicator: radarLabels.map(label => ({
+        name: label,
+        max: radarMax[label] || 100
+      }))
     },
     series: [{
       type: 'radar',
-      data: [{
-        value: data,
-        name: '健康指标',
-        areaStyle: {
-          color: 'rgba(124, 58, 237, 0.35)'
+      data: [
+        {
+          value: healthyValues,
+          name: '健康群体',
+          lineStyle: { color: '#22c55e', width: 2.5 },
+          itemStyle: { color: '#22c55e', borderWidth: 2, borderColor: '#fff' },
+          areaStyle: { color: 'rgba(34, 197, 94, 0.2)' },
+          emphasis: { areaStyle: { color: 'rgba(34, 197, 94, 0.35)' } }
         },
-        lineStyle: {
-          color: '#8b5cf6',
-          width: 3
-        },
-        itemStyle: {
-          color: '#8b5cf6',
-          borderWidth: 2,
-          borderColor: '#fff'
-        },
-        emphasis: {
-          areaStyle: {
-            color: 'rgba(124, 58, 237, 0.5)'
-          }
+        {
+          value: patientValues,
+          name: '患者群体',
+          lineStyle: { color: '#ef4444', width: 2.5 },
+          itemStyle: { color: '#ef4444', borderWidth: 2, borderColor: '#fff' },
+          areaStyle: { color: 'rgba(239, 68, 68, 0.2)' },
+          emphasis: { areaStyle: { color: 'rgba(239, 68, 68, 0.35)' } }
         }
-      }]
+      ]
     }]
   }
 
@@ -145,6 +183,6 @@ function handleResize() {
         <p class="text-xs" style="color: var(--ds-text-secondary)">六维度综合健康评估</p>
       </div>
     </div>
-    <div ref="chartRef" style="width: 100%; height: 340px;"></div>
+    <div ref="chartRef" style="width: 100%; height: 500px;"></div>
   </div>
 </template>
