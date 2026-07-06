@@ -429,8 +429,8 @@ async function deleteSession(sessionId) {
                     ? 'bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-br-sm'
                     : 'bg-white border border-slate-100 text-slate-800 rounded-bl-sm shadow-soft'"
                 >
-                  <div class="message-content text-[13px] leading-relaxed" v-html="msg.html"></div>
-                  <div class="text-[10px] mt-2 opacity-50">
+                  <div class="message-content text-sm leading-relaxed" v-html="msg.html"></div>
+                  <div class="text-[11px] mt-2 opacity-50">
                     {{ msg.timestamp }}
                   </div>
                 </div>
