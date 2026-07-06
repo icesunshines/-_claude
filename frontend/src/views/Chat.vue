@@ -18,6 +18,7 @@ const currentSessionId = ref(null)
 const sessions = ref([])
 const showSidebar = ref(true)
 const creatingSession = ref(false)
+const showAllQuickQuestions = ref(true)
 
 const quickQuestions = [
   '如何预防糖尿病？',
@@ -349,16 +350,25 @@ async function deleteSession(sessionId) {
           </div>
         </div>
 
-        <!-- 快捷问题条 -->
-        <div class="bg-slate-50/80 px-3 py-2 border-b border-slate-200 flex-shrink-0">
-          <div class="flex flex-wrap gap-1.5">
+        <!-- 快捷问题标签 -->
+        <div class="bg-white px-4 py-2 border-b border-slate-100 flex-shrink-0">
+          <div class="flex flex-wrap gap-2" :class="messages.length === 0 ? '' : 'max-h-[40px] overflow-hidden transition-all duration-300'">
+            <template v-if="showAllQuickQuestions || messages.length === 0">
+              <button
+                v-for="q in quickQuestions"
+                :key="q"
+                @click="quickQuestion(q)"
+                class="px-3 py-1.5 bg-white border border-primary-200 text-primary-700 rounded-full hover:bg-primary-50 hover:border-primary-300 transition-all text-xs whitespace-nowrap"
+              >
+                {{ q }}
+              </button>
+            </template>
             <button
-              v-for="q in quickQuestions"
-              :key="q"
-              @click="quickQuestion(q)"
-              class="px-2.5 py-1 bg-white border border-primary-200 text-primary-700 rounded-md hover:bg-primary-50 hover:border-primary-300 transition-all text-xs"
+              v-if="messages.length > 0 && quickQuestions.length > 3"
+              @click="showAllQuickQuestions = !showAllQuickQuestions"
+              class="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 rounded-full hover:bg-slate-50 hover:border-slate-300 transition-all text-xs whitespace-nowrap"
             >
-              {{ q }}
+              {{ showAllQuickQuestions ? '收起' : '更多' }}
             </button>
           </div>
         </div>
