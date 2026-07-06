@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { getStatsOverview, getBloodSugarStats, getHistory } from '../api/request'
-import { DataBoard, Timer, Refresh, DataAnalysis, Monitor } from '@element-plus/icons-vue'
+import { getStatsOverview, getBloodSugarStats, getHistory, connectRealtimeStats, disconnectRealtimeStats } from '../api/request'
+import { DataBoard, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import AgeTrendChart from '../components/Charts/AgeTrendChart.vue'
 import HexRadarChart from '../components/Charts/HexRadarChart.vue'
@@ -11,50 +11,48 @@ import DiabetesCharts from '../components/Charts/DiabetesCharts.vue'
 const overview = ref(null)
 const loading = ref(true)
 const bloodSugarData = ref(null)
+const recentRecords = ref([])
 
-const realTimeStats = ref({
-  time: new Date().toLocaleTimeString()
+// 实时统计数据
+const realtimeStats = ref({
+  total_predictions: 0,
+  total_users: 0,
+  connected: false
 })
 
+// 4个统计卡片
 const stats = ref([
-  { label: '总样本量', value: 0, icon: '📊', color: 'primary', animateValue: 0, trend: 'up', trendValue: 12 },
-  { label: '特征维度', value: 0, icon: '📈', color: 'medical', animateValue: 0, trend: 'stable', trendValue: 0 },
-  { label: '预测准确率', value: '0%', icon: '✅', color: 'success', animateValue: 0, trend: 'up', trendValue: 5 },
-  { label: '模型 AUC', value: '0.0', icon: '🏆', color: 'warning', animateValue: 0, trend: 'up', trendValue: 3 }
+  { label: '总样本量', value: '--', icon: '📊', color: 'primary' },
+  { label: '特征维度', value: '--', icon: '📈', color: 'medical' },
+  { label: '总预测数', value: '--', icon: '🎯', color: 'success', isRealtime: true },
+  { label: '模型 AUC', value: '--', icon: '🏆', color: 'warning' }
 ])
 
-const recentRecords = ref([])
-let historyLoaded = false
+// 自动刷新
+const refreshCountdown = ref(30)
+let countdownTimer = null
+let autoRefreshTimer = null
 
-let realTimeInterval = null
-
-function animateNumber(target, duration = 1500) {
-  const start = 0
-  const end = parseInt(target) || 0
-  const startTime = Date.now()
-
-  function update() {
-    const elapsed = Date.now() - startTime
-    const progress = Math.min(elapsed / duration, 1)
-    const current = Math.floor(start + (end - start) * (1 - Math.pow(1 - progress, 3)))
-
-    if (typeof target === 'string' && target.includes('%')) {
-      stats.value.find(s => s.label.includes('准确率') || s.label.includes('AUC')).animateValue = current
-    } else {
-      const stat = stats.value.find(s => s.label.includes('总样本') || s.label.includes('特征') || s.label.includes('准确率'))
-      if (stat) stat.animateValue = current
+function startAutoRefresh() {
+  refreshCountdown.value = 30
+  countdownTimer = setInterval(() => {
+    refreshCountdown.value--
+    if (refreshCountdown.value <= 0) {
+      refreshCountdown.value = 30
     }
+  }, 1000)
 
-    if (progress < 1) {
-      requestAnimationFrame(update)
-    }
-  }
-
-  update()
+  autoRefreshTimer = setInterval(() => {
+    loadData()
+    refreshCountdown.value = 30
+  }, 30000)
 }
 
-function updateRealTimeStats() {
-  realTimeStats.value.time = new Date().toLocaleTimeString()
+function stopAutoRefresh() {
+  if (countdownTimer) clearInterval(countdownTimer)
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer)
+  countdownTimer = null
+  autoRefreshTimer = null
 }
 
 async function loadData() {
@@ -68,46 +66,135 @@ async function loadData() {
     overview.value = overviewData
     bloodSugarData.value = bsData
 
-    stats.value[0].value = overviewData.sample_count_initial || 0
-    stats.value[1].value = overviewData.feature_count_blood_sugar || 0
-    stats.value[2].value = `${Math.round((overviewData.diabetes_metrics?.accuracy || 0) * 100)}%`
+    // 更新统计卡片
+    stats.value[0].value = (overviewData.sample_count_initial || 0).toLocaleString()
+    stats.value[1].value = (overviewData.feature_count_blood_sugar || 0).toLocaleString()
+    stats.value[2].value = (realtimeStats.value.total_predictions || 0).toLocaleString()
     stats.value[3].value = (overviewData.diabetes_metrics?.auc || 0).toFixed(2)
 
-    animateNumber(overviewData.sample_count_initial || 0)
-    historyLoaded = true
+    // 加载最近预测记录
     recentRecords.value = (historyData || []).slice(0, 5).map(item => ({
       id: item.id || item.created_at,
       type: item.type === 'blood_sugar' ? '血糖预测' : '糖尿病预测',
       time: formatTime(item.created_at),
       result: formatResult(item.type, item.result),
-      riskLevel: item.type === 'blood_sugar' ? item.result?.risk_level : (item.result?.risk === 1 ? '高风险' : (item.result?.probability > 0.7 ? '高风险' : (item.result?.probability > 0.3 ? '中风险' : '低风险')))
+      riskLevel: item.type === 'blood_sugar'
+        ? (item.result?.risk_level || '低风险')
+        : (item.result?.risk === 1 ? '高风险' : (item.result?.probability > 0.7 ? '高风险' : (item.result?.probability > 0.3 ? '中风险' : '低风险')))
     }))
   } catch (e) {
     console.error('加载数据失败:', e)
+    ElMessage.error('数据加载失败')
   } finally {
     loading.value = false
   }
 }
 
 function manualRefresh() {
-  ElMessage.info('正在刷新数据...')
+  ElMessage.success('数据已刷新')
   loadData()
+  refreshCountdown.value = 30
 }
 
-onMounted(async () => {
-  await loadData()
-  realTimeInterval = setInterval(updateRealTimeStats, 3000)
-})
+// 实时数据回调
+function handleRealtimeMessage(data) {
+  realtimeStats.value.total_predictions = data.total_predictions || 0
+  realtimeStats.value.total_users = data.total_users || 0
+  realtimeStats.value.connected = true
 
-onBeforeUnmount(() => {
-  if (realTimeInterval) {
-    clearInterval(realTimeInterval)
+  // 更新统计卡片中的实时数据
+  stats.value[2].value = (data.total_predictions || 0).toLocaleString()
+}
+
+function handleRealtimeError() {
+  realtimeStats.value.connected = false
+}
+
+// 健康预警区
+const alerts = computed(() => {
+  if (!bloodSugarData.value?.distribution || !overview.value) {
+    return []
   }
-  window.removeEventListener('resize', handleResize)
+
+  const alerts = []
+  const dist = bloodSugarData.value.distribution
+  const total = Object.values(dist).reduce((a, b) => a + b, 0)
+
+  // 红色预警：高血糖比例 > 20%
+  if (total > 0) {
+    const elevated = (dist['5.6-7'] || 0) + (dist['7-11.1'] || 0) + (dist['>11.1'] || 0)
+    const elevatedPct = elevated / total
+    if (elevatedPct > 0.2) {
+      alerts.push({
+        level: 'high',
+        color: 'red',
+        title: '高血糖风险预警',
+        message: `检测到 ${(elevatedPct * 100).toFixed(1)}% 的样本血糖偏高，建议加强血糖监测和管理。`,
+        icon: '⚠️'
+      })
+    }
+  }
+
+  // 黄色预警：模型 AUC 偏低
+  const auc = overview.value.diabetes_metrics?.auc || 0
+  if (auc < 0.7 && auc > 0) {
+    alerts.push({
+      level: 'medium',
+      color: 'yellow',
+      title: '模型性能提醒',
+      message: `当前糖尿病预测模型 AUC 为 ${auc.toFixed(2)}，建议关注模型性能。`,
+      icon: '📊'
+    })
+  }
+
+  // 蓝色提示：高风险年龄段
+  if (bloodSugarData.value?.age_stats) {
+    const ages = Object.entries(bloodSugarData.value.age_stats)
+    const highRiskAges = ages.filter(([_, value]) => value > 7)
+    if (highRiskAges.length > 0) {
+      const ageRanges = highRiskAges.map(([range]) => range).join('、')
+      alerts.push({
+        level: 'low',
+        color: 'blue',
+        title: '高风险年龄段提示',
+        message: `${ageRanges} 岁年龄段平均血糖较高，建议重点关注该人群健康管理。`,
+        icon: '💡'
+      })
+    }
+  }
+
+  return alerts
 })
 
-function handleResize() {
-  window.dispatchEvent(new Event('resize'))
+const alertLevelColor = {
+  high: { border: 'border-red-500', bg: 'bg-red-50', text: 'text-red-700', badge: 'bg-red-500' },
+  medium: { border: 'border-yellow-500', bg: 'bg-yellow-50', text: 'text-yellow-700', badge: 'bg-yellow-500' },
+  low: { border: 'border-blue-500', bg: 'bg-blue-50', text: 'text-blue-700', badge: 'bg-blue-500' }
+}
+
+function formatTime(dateStr) {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diff = (now - date) / 1000
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function formatResult(type, result) {
+  if (!result) return '--'
+  if (type === 'blood_sugar') {
+    return result.predicted_bgl !== undefined ? `${result.predicted_bgl} mmol/L` : '--'
+  }
+  if (type === 'diabetes') {
+    if (result.risk === 1) return '高风险'
+    if (result.risk === 0) return '低风险'
+    if (result.probability !== undefined) return `${(result.probability * 100).toFixed(1)}%`
+    return '--'
+  }
+  return '--'
 }
 
 // ========== 数据解读 computed ==========
@@ -141,193 +228,183 @@ const rightSummary = computed(() => {
   return `本次共分析 ${total} 份体检数据。正常血糖占比 ${normalPct}%（${normal} 人），偏高占比 ${elevatedPct}%（${elevated} 人），建议关注偏高人群进一步筛查。`
 })
 
-function formatTime(dateStr) {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diff = (now - date) / 1000
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
-  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
+onMounted(async () => {
+  await loadData()
+  startAutoRefresh()
+  connectRealtimeStats(handleRealtimeMessage, handleRealtimeError)
+})
 
-function formatResult(type, result) {
-  if (!result) return '--'
-  if (type === 'blood_sugar') {
-    return result.predicted_bgl !== undefined ? `${result.predicted_bgl} mmol/L` : '--'
-  }
-  if (type === 'diabetes') {
-    if (result.risk === 1) return '高风险'
-    if (result.risk === 0) return '低风险'
-    if (result.probability !== undefined) return `${(result.probability * 100).toFixed(1)}%`
-    return '--'
-  }
-  return '--'
-}
+onBeforeUnmount(() => {
+  stopAutoRefresh()
+  disconnectRealtimeStats()
+})
 </script>
 
 <template>
-  <div class="dashboard-page">
-    <!-- A. 顶部区域 -->
-    <div class="card mb-6 p-6">
-      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div class="flex items-center gap-4">
-          <div class="w-14 h-14 bg-gradient-to-br from-primary-500 to-medical-500 rounded-2xl flex items-center justify-center shadow-glow">
-            <el-icon :size="28" color="white">
-              <DataBoard />
-            </el-icon>
-          </div>
-          <div>
-            <h1 class="text-2xl font-bold bg-gradient-to-r from-primary-600 to-medical-600 bg-clip-text text-transparent">
-              健康数据智能分析平台
-            </h1>
-            <p class="text-slate-500 text-sm mt-1 flex items-center gap-2">
-              <span class="inline-block w-2 h-2 bg-success-500 rounded-full animate-pulse"></span>
-              血糖趋势 / 健康指标 / 风险分布
-            </p>
-          </div>
-        </div>
-
-        <div class="flex items-center gap-6">
-          <div class="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-medium">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            系统运行正常
-          </div>
-
-          <div class="text-center">
-            <p class="text-slate-500 text-xs mb-1 flex items-center gap-1 justify-center">
-              <el-icon :size="14"><Timer /></el-icon>
-              系统时间
-            </p>
-            <p class="text-xl font-bold text-slate-800 font-mono">{{ realTimeStats.time }}</p>
-          </div>
-          <button
-            @click="manualRefresh"
-            class="btn-secondary flex items-center gap-2 text-sm py-2 px-4"
-          >
-            <el-icon :size="16"><Refresh /></el-icon>
-            刷新
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- B. 统计卡片 -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+  <div class="dashboard-page h-full overflow-y-auto">
+    <!-- 统计卡片 -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
       <div
         v-for="(stat, idx) in stats"
         :key="stat.label"
-        class="stat-card card-hover animate-slide-up"
-        :style="{ animationDelay: `${idx * 0.1}s` }"
+        class="stat-card p-4"
       >
-        <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center justify-between mb-2">
           <div
-            class="w-12 h-12 rounded-xl flex items-center justify-center text-xl"
-            :class="[
-              stat.color === 'primary' ? 'bg-primary-100' :
-              stat.color === 'medical' ? 'bg-medical-100' :
-              stat.color === 'success' ? 'bg-success-100' :
-              'bg-warning-100'
-            ]"
+            class="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
+            :class="{
+              'bg-primary-100': stat.color === 'primary',
+              'bg-medical-100': stat.color === 'medical',
+              'bg-success-100': stat.color === 'success',
+              'bg-warning-100': stat.color === 'warning'
+            }"
           >
             {{ stat.icon }}
           </div>
+          <div v-if="stat.isRealtime" class="flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full animate-pulse" :class="realtimeStats.connected ? 'bg-success-500' : 'bg-slate-300'"></span>
+            <span class="text-xs text-slate-500">实时</span>
+          </div>
         </div>
         <div>
-          <p class="text-2xl font-bold text-slate-800 mb-1">{{ stat.value }}</p>
-          <p class="text-slate-500 font-medium text-sm">{{ stat.label }}</p>
+          <p class="text-xl font-bold text-slate-800">{{ stat.value }}</p>
+          <p class="text-xs text-slate-500">{{ stat.label }}</p>
         </div>
       </div>
     </div>
 
-    <!-- C. 三列主图表区域 (3:4:3) -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
-      <!-- C1. 左侧 — 年龄段血糖趋势 + 文字解读 -->
-      <div class="lg:col-span-3 card p-6 flex flex-col">
-        <div class="flex-1">
-          <AgeTrendChart :data="bloodSugarData" :loading="loading" />
-        </div>
-        <div v-if="leftSummary" class="mt-5 pt-4 border-t border-slate-100">
+    <!-- 中轴对称图表布局 -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-4">
+      <!-- 左侧：年龄趋势 -->
+      <div class="lg:col-span-3 card p-4">
+        <AgeTrendChart :data="bloodSugarData" :loading="loading" />
+        <div v-if="leftSummary" class="mt-3 pt-3 border-t border-slate-100">
           <p class="text-xs text-slate-500 leading-relaxed">{{ leftSummary }}</p>
         </div>
       </div>
 
-      <!-- C2. 中间 — 六边形雷达图 + 文字解读 -->
-      <div class="lg:col-span-6 card p-6 flex flex-col">
-        <div class="flex-1">
-          <HexRadarChart :overview="overview" :loading="loading" />
-        </div>
-        <div v-if="centerSummary" class="mt-5 pt-4 border-t border-slate-100">
+      <!-- 中间：六维雷达图（视觉重心） -->
+      <div class="lg:col-span-6 card p-4">
+        <HexRadarChart :overview="overview" :loading="loading" />
+        <div v-if="centerSummary" class="mt-3 pt-3 border-t border-slate-100">
           <p class="text-xs text-slate-500 leading-relaxed">{{ centerSummary }}</p>
         </div>
       </div>
 
-      <!-- C3. 右侧 — 血糖风险分布 + 文字解读 -->
-      <div class="lg:col-span-3 card p-6 flex flex-col">
-        <div class="flex-1">
-          <RiskDistributionChart :data="bloodSugarData" :loading="loading" />
-        </div>
-        <div v-if="rightSummary" class="mt-5 pt-4 border-t border-slate-100">
+      <!-- 右侧：血糖风险分布 -->
+      <div class="lg:col-span-3 card p-4">
+        <RiskDistributionChart :data="bloodSugarData" :loading="loading" />
+        <div v-if="rightSummary" class="mt-3 pt-3 border-t border-slate-100">
           <p class="text-xs text-slate-500 leading-relaxed">{{ rightSummary }}</p>
         </div>
       </div>
     </div>
 
-    <!-- D. 底部区域：临床指标对比 + 最近预测记录 -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
-      <div class="lg:col-span-8 card p-6">
-        <div class="flex items-center gap-3 mb-4">
-          <div class="w-10 h-10 bg-medical-100 rounded-xl flex items-center justify-center">
-            <DataAnalysis class="text-medical-600" />
+    <!-- 底部：临床指标对比 + 最近预测 -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-4">
+      <div class="lg:col-span-8 card p-4">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-8 h-8 bg-medical-100 rounded-lg flex items-center justify-center">
+            <DataBoard class="text-medical-600" />
           </div>
           <div>
-            <h3 class="text-xl font-bold text-slate-800">临床指标对比</h3>
-            <p class="text-slate-500 text-sm">健康人群 vs 患者群体</p>
+            <h3 class="text-lg font-bold text-slate-800">临床指标对比</h3>
+            <p class="text-xs text-slate-500">健康人群 vs 患者群体</p>
           </div>
         </div>
-        <div class="h-80">
+        <div class="h-72">
           <DiabetesCharts />
         </div>
       </div>
 
-      <div class="lg:col-span-4 card p-6">
-        <div class="flex items-center gap-3 mb-4">
-          <div class="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
-            <Monitor class="text-primary-600" />
+      <div class="lg:col-span-4 card p-4">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+            <span class="text-primary-600 text-sm">📋</span>
           </div>
           <div>
-            <h3 class="text-xl font-bold text-slate-800">最近预测</h3>
-            <p class="text-slate-500 text-sm">实时预测数据</p>
+            <h3 class="text-lg font-bold text-slate-800">最近预测</h3>
+            <p class="text-xs text-slate-500">实时预测记录</p>
           </div>
         </div>
 
-        <div class="space-y-3 max-h-80 overflow-y-auto">
+        <div class="space-y-2 max-h-72 overflow-y-auto">
           <div
             v-for="record in recentRecords"
             :key="record.id"
-            class="p-4 bg-slate-50 rounded-xl border border-slate-100 hover:border-primary-200 transition-all duration-300"
+            class="p-3 bg-slate-50 rounded-lg border border-slate-100 hover:border-primary-200 transition-all duration-300"
           >
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-sm font-semibold text-slate-700">{{ record.type }}</span>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs font-semibold text-slate-700">{{ record.type }}</span>
               <span class="text-xs text-slate-500">{{ record.time }}</span>
             </div>
             <div class="flex items-center justify-between">
-              <span class="text-sm text-slate-600">我</span>
-              <span class="text-sm font-bold" :class="
-                record.riskLevel === '低风险' ? 'text-success-600' :
-                record.riskLevel === '中风险' ? 'text-warning-600' :
-                record.riskLevel === '高风险' ? 'text-danger-600' :
-                'text-primary-600'
-              ">{{ record.result }}</span>
+              <span class="text-xs text-slate-600">预测结果</span>
+              <span class="text-xs font-bold" :class="{
+                'text-success-600': record.riskLevel === '低风险',
+                'text-warning-600': record.riskLevel === '中风险',
+                'text-danger-600': record.riskLevel === '高风险'
+              }">{{ record.result }}</span>
             </div>
           </div>
-          <div v-if="!recentRecords.length && !loading" class="text-center text-slate-400 py-8 text-sm">
-            暂无预测记录，快去【风险预测】试试吧
+          <div v-if="!recentRecords.length && !loading" class="text-center text-slate-400 py-6 text-xs">
+            暂无预测记录
           </div>
         </div>
       </div>
     </div>
+
+    <!-- 预警区 -->
+    <div v-if="alerts.length > 0" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+      <div
+        v-for="alert in alerts"
+        :key="alert.level"
+        class="border-l-4 p-4 rounded-r-lg"
+        :class="{
+          'border-red-500 bg-red-50': alert.level === 'high',
+          'border-yellow-500 bg-yellow-50': alert.level === 'medium',
+          'border-blue-500 bg-blue-50': alert.level === 'low'
+        }"
+      >
+        <div class="flex items-start gap-3">
+          <span class="text-xl">{{ alert.icon }}</span>
+          <div class="flex-1">
+            <h4 class="text-sm font-bold mb-1" :class="{
+              'text-red-700': alert.level === 'high',
+              'text-yellow-700': alert.level === 'medium',
+              'text-blue-700': alert.level === 'low'
+            }">{{ alert.title }}</h4>
+            <p class="text-xs leading-relaxed" :class="{
+              'text-red-600': alert.level === 'high',
+              'text-yellow-600': alert.level === 'medium',
+              'text-blue-600': alert.level === 'low'
+            }">{{ alert.message }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div v-else class="mb-4 p-4 bg-success-50 border border-success-200 rounded-lg">
+      <div class="flex items-center gap-2">
+        <span class="text-success-600 text-lg">✓</span>
+        <p class="text-sm text-success-700 font-medium">当前无预警信息，系统运行正常</p>
+      </div>
+    </div>
+
+    <!-- 右下角浮动刷新按钮 -->
+    <button
+      @click="manualRefresh"
+      class="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-primary-500 to-medical-500 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center group z-40"
+      :title="`下次自动刷新: ${refreshCountdown}秒`"
+    >
+      <div class="relative">
+        <el-icon :size="24" class="group-hover:rotate-180 transition-transform duration-500">
+          <Refresh />
+        </el-icon>
+        <span class="absolute -top-1 -right-1 w-5 h-5 bg-white text-primary-600 text-xs font-bold rounded-full flex items-center justify-center">
+          {{ refreshCountdown }}
+        </span>
+      </div>
+    </button>
   </div>
 </template>
 
@@ -335,5 +412,7 @@ function formatResult(type, result) {
 .dashboard-page {
   max-width: 1600px;
   margin: 0 auto;
+  padding: 1rem;
+  min-height: calc(100vh - 56px);
 }
 </style>

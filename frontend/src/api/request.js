@@ -105,4 +105,68 @@ export async function chat(message) {
   return res.data
 }
 
+let realtimeAbortController = null
+
+export function connectRealtimeStats(onMessage, onError) {
+  disconnectRealtimeStats()
+  realtimeAbortController = new AbortController()
+
+  async function connect() {
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch('/api/realtime/stats', {
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: realtimeAbortController.signal
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim()
+            if (data && data !== '[DONE]') {
+              try {
+                const parsed = JSON.parse(data)
+                if (onMessage) onMessage(parsed)
+              } catch (e) {
+                console.error('解析 SSE 数据失败:', e)
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        console.error('SSE 连接失败:', e)
+        if (onError) onError(e)
+        // 3秒后自动重连
+        setTimeout(connect, 3000)
+      }
+    }
+  }
+
+  connect()
+}
+
+export function disconnectRealtimeStats() {
+  if (realtimeAbortController) {
+    realtimeAbortController.abort()
+    realtimeAbortController = null
+  }
+}
+
 export default api
