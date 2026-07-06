@@ -404,44 +404,42 @@ async function deleteSession(sessionId) {
             </div>
           </div>
 
-          <div v-if="messages.length" class="space-y-2.5">
+          <div v-if="messages.length" class="space-y-4">
             <div
               v-for="msg in messages"
               :key="msg.id"
-              class="message-item flex"
+              class="flex"
               :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
             >
               <div
-                class="message-bubble max-w-[75%]"
-                :class="msg.role === 'user'
-                  ? 'bg-gradient-to-r from-primary-500 to-medical-500 text-white rounded-xl rounded-tr-sm'
-                  : 'bg-white border border-slate-200 text-slate-800 rounded-xl rounded-tl-sm'"
+                class="max-w-[65%]"
+                :class="msg.role === 'user' ? '' : 'flex items-start gap-2'"
               >
-                <div class="flex items-start gap-2">
-                  <div
-                    class="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0"
-                    :class="msg.role === 'user' ? 'bg-primary-600' : 'bg-slate-100'"
-                  >
-                    <el-icon :size="14" :class="msg.role === 'user' ? 'text-white' : 'text-primary-600'">
-                      <User v-if="msg.role === 'user'" />
-                      <ChatDotRound v-else />
-                    </el-icon>
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <div class="message-content text-[13px] leading-relaxed" v-html="msg.html"></div>
-                    <div class="text-[11px] mt-1 opacity-60">
-                      {{ msg.timestamp }}
-                    </div>
+                <!-- AI 头像（仅 AI 消息显示） -->
+                <div
+                  v-if="msg.role !== 'user'"
+                  class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center flex-shrink-0 mt-1"
+                >
+                  <el-icon :size="14" class="text-white"><ChatDotRound /></el-icon>
+                </div>
+
+                <div
+                  class="message-bubble rounded-2xl px-4 py-3"
+                  :class="msg.role === 'user'
+                    ? 'bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-br-sm'
+                    : 'bg-white border border-slate-100 text-slate-800 rounded-bl-sm shadow-soft'"
+                >
+                  <div class="message-content text-[13px] leading-relaxed" v-html="msg.html"></div>
+                  <div class="text-[10px] mt-2 opacity-50">
+                    {{ msg.timestamp }}
                   </div>
                 </div>
               </div>
             </div>
 
             <div v-if="loading" class="flex justify-start">
-              <div class="bg-white border border-slate-200 text-slate-800 rounded-xl rounded-tl-sm px-3 py-2 flex items-center gap-2">
-                <el-icon class="animate-spin text-primary-600" :size="16">
-                  <Refresh />
-                </el-icon>
+              <div class="flex items-center gap-2 bg-white border border-slate-100 rounded-2xl rounded-bl-sm px-4 py-3 shadow-soft">
+                <el-icon class="animate-spin text-primary-500" :size="16"><Refresh /></el-icon>
                 <span class="text-slate-500 text-xs">正在思考...</span>
               </div>
             </div>
