@@ -87,6 +87,8 @@ async function handleToggleRole(user) {
   }
 }
 
+</script>
+
 <template>
   <div class="admin-page max-w-6xl mx-auto">
     <div class="card mb-6 p-6">

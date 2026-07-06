@@ -256,7 +256,45 @@ def load_pipeline(name: str) -> Any:
     path = os.path.join(MODEL_DIR, f'{name}_pipeline.joblib')
     if not os.path.exists(path):
         raise FileNotFoundError(f'Pipeline 文件不存在: {path}')
-    return joblib.load(path)
+    pipeline = joblib.load(path)
+    _ensure_pipeline_compatible(pipeline, name)
+    return pipeline
+
+
+def _ensure_pipeline_compatible(pipeline: Any, name: str) -> None:
+    """Check and fix sklearn version compatibility for imputer/scaler in the pipeline.
+
+    Handles the SimpleImputer internal API break between sklearn 1.5.x
+    (_fill_dtype) and 1.6+ (_fit_dtype). See sklearn issue #28333.
+    """
+    import sklearn as _sklearn
+    from packaging.version import Version as _Ver
+
+    _sklearn_ver = _sklearn.__version__
+    if _Ver(_sklearn_ver) < _Ver('1.6.0'):
+        return  # old sklearn, no issue
+
+    imputer = getattr(pipeline, 'imputer', None)
+    if imputer is not None:
+        # Check for the _fill_dtype → _fit_dtype incompatibility
+        if not hasattr(imputer, '_fit_dtype') and hasattr(imputer, 'statistics_'):
+            # Imputer was fitted but lacks _fit_dtype (saved with old sklearn)
+            # Rebuild a fresh imputer and migrate its fitted state
+            old_stats = imputer.statistics_.copy()
+            old_n_features = imputer.n_features_in_
+            fresh = type(imputer)(strategy=imputer.strategy)
+            fresh.statistics_ = old_stats
+            fresh.n_features_in_ = old_n_features
+            fresh.feature_names_in_ = getattr(imputer, 'feature_names_in_', None)
+            pipeline.imputer = fresh
+
+    scaler = getattr(pipeline, 'scaler', None)
+    if scaler is not None:
+        if not hasattr(scaler, 'mean_'):
+            raise ValueError(
+                f'Pipeline {name}: scaler is not fitted. '
+                'Run `python src/train_models.py` to regenerate artifacts.'
+            )
 
 
 def save_metrics_meta(metrics: Dict[str, Any], name: str = 'model_metrics') -> str:

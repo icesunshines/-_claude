@@ -404,5 +404,28 @@
       "fn": 39,
       "tp": 55
     }
+  },
+  "blood_sugar_ensemble": {
+    "oof_rmse": 1.4732,
+    "oof_r2": 0.1511,
+    "test": {
+      "mse": 1.369,
+      "rmse": 1.1701,
+      "mae": 0.6876,
+      "r2": 0.195
+    }
+  },
+  "diabetes_ensemble": {
+    "oof_auc": 0.7672,
+    "oof_accuracy": 0.705,
+    "oof_f1": 0.6638,
+    "test": {
+      "auc": 0.7688,
+      "accuracy": 0.69,
+      "precision": 0.6951,
+      "recall": 0.6064,
+      "f1": 0.6477,
+      "patient_ratio": 0.47
+    }
   }
 }

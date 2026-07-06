@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { getStatsOverview, getBloodSugarStats, getHistory, connectRealtimeStats, disconnectRealtimeStats } from '../api/request'
+import { getStatsOverview, getBloodSugarStats, getHistory, connectRealtimeStats, disconnectRealtimeStats, getEnsembleComparison } from '../api/request'
 import { DataBoard, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import AgeTrendChart from '../components/Charts/AgeTrendChart.vue'
@@ -110,6 +110,18 @@ function handleRealtimeError() {
   realtimeStats.value.connected = false
 }
 
+async function loadEnsembleComparison() {
+  ensembleLoading.value = true
+  try {
+    ensembleComparison.value = await getEnsembleComparison()
+  } catch (e) {
+    console.error('加载模型对比数据失败:', e)
+    ensembleComparison.value = null
+  } finally {
+    ensembleLoading.value = false
+  }
+}
+
 // 健康预警区
 const alerts = computed(() => {
   if (!bloodSugarData.value?.distribution || !overview.value) {
@@ -165,6 +177,9 @@ const alerts = computed(() => {
 
   return alerts
 })
+
+const ensembleComparison = ref(null)
+const ensembleLoading = ref(false)
 
 const alertLevelColor = {
   high: { border: 'border-red-500', bg: 'bg-red-50', text: 'text-red-700', badge: 'bg-red-500' },
@@ -232,6 +247,7 @@ onMounted(async () => {
   await loadData()
   startAutoRefresh()
   connectRealtimeStats(handleRealtimeMessage, handleRealtimeError)
+  loadEnsembleComparison()
 })
 
 onBeforeUnmount(() => {
@@ -312,7 +328,7 @@ onBeforeUnmount(() => {
             <p class="text-xs text-slate-500">健康人群 vs 患者群体</p>
           </div>
         </div>
-        <div class="h-72">
+        <div class="h-[420px]">
           <DiabetesCharts />
         </div>
       </div>
@@ -351,6 +367,117 @@ onBeforeUnmount(() => {
             暂无预测记录
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- 模型性能对比 -->
+    <div v-if="ensembleComparison" class="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-4">
+      <div class="lg:col-span-12 card p-5">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-8 h-8 bg-medical-100 rounded-lg flex items-center justify-center">
+            <span class="text-medical-600 text-sm">🏆</span>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold text-slate-800">模型性能对比</h3>
+            <p class="text-xs text-slate-500">单一 LightGBM 模型 vs Stacking 融合模型 (LightGBM + XGBoost)</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- 血糖预测对比 -->
+          <div>
+            <h4 class="text-sm font-bold text-slate-700 mb-3 pb-2 border-b border-slate-100">血糖预测 (回归)</h4>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="border-b border-slate-200">
+                    <th class="text-left py-2 px-2 text-slate-500 font-medium">指标</th>
+                    <th class="text-center py-2 px-2 text-slate-600 font-medium">单模型</th>
+                    <th class="text-center py-2 px-2 text-medical-700 font-medium">融合模型</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="border-b border-slate-100">
+                    <td class="py-2 px-2 text-slate-600">RMSE</td>
+                    <td class="py-2 px-2 text-center font-mono">{{ ensembleComparison?.blood_sugar?.single?.rmse ?? '--' }}</td>
+                    <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ ensembleComparison?.blood_sugar?.ensemble?.rmse ?? '--' }}</td>
+                  </tr>
+                  <tr class="border-b border-slate-100">
+                    <td class="py-2 px-2 text-slate-600">R²</td>
+                    <td class="py-2 px-2 text-center font-mono">{{ ensembleComparison?.blood_sugar?.single?.r2 ?? '--' }}</td>
+                    <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ ensembleComparison?.blood_sugar?.ensemble?.r2 ?? '--' }}</td>
+                  </tr>
+                  <tr>
+                    <td class="py-2 px-2 text-slate-600">MAE</td>
+                    <td class="py-2 px-2 text-center font-mono">{{ ensembleComparison?.blood_sugar?.single?.mae ?? '--' }}</td>
+                    <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ ensembleComparison?.blood_sugar?.ensemble?.mae ?? '--' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 糖尿病预测对比 -->
+          <div>
+            <h4 class="text-sm font-bold text-slate-700 mb-3 pb-2 border-b border-slate-100">糖尿病预测 (分类)</h4>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="border-b border-slate-200">
+                    <th class="text-left py-2 px-2 text-slate-500 font-medium">指标</th>
+                    <th class="text-center py-2 px-2 text-slate-600 font-medium">单模型</th>
+                    <th class="text-center py-2 px-2 text-medical-700 font-medium">融合模型</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="border-b border-slate-100">
+                    <td class="py-2 px-2 text-slate-600">AUC</td>
+                    <td class="py-2 px-2 text-center font-mono">{{ ((ensembleComparison?.diabetes?.single?.auc || 0) * 100).toFixed(1) }}%</td>
+                    <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ ((ensembleComparison?.diabetes?.ensemble?.auc || 0) * 100).toFixed(1) }}%</td>
+                  </tr>
+                  <tr class="border-b border-slate-100">
+                    <td class="py-2 px-2 text-slate-600">Accuracy</td>
+                    <td class="py-2 px-2 text-center font-mono">{{ ((ensembleComparison?.diabetes?.single?.accuracy || 0) * 100).toFixed(1) }}%</td>
+                    <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ ((ensembleComparison?.diabetes?.ensemble?.accuracy || 0) * 100).toFixed(1) }}%</td>
+                  </tr>
+                  <tr class="border-b border-slate-100">
+                    <td class="py-2 px-2 text-slate-600">Precision</td>
+                    <td class="py-2 px-2 text-center font-mono">{{ ((ensembleComparison?.diabetes?.single?.precision || 0) * 100).toFixed(1) }}%</td>
+                    <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ ((ensembleComparison?.diabetes?.ensemble?.precision || 0) * 100).toFixed(1) }}%</td>
+                  </tr>
+                  <tr class="border-b border-slate-100">
+                    <td class="py-2 px-2 text-slate-600">Recall</td>
+                    <td class="py-2 px-2 text-center font-mono">{{ ((ensembleComparison?.diabetes?.single?.recall || 0) * 100).toFixed(1) }}%</td>
+                    <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ ((ensembleComparison?.diabetes?.ensemble?.recall || 0) * 100).toFixed(1) }}%</td>
+                  </tr>
+                  <tr>
+                    <td class="py-2 px-2 text-slate-600">F1</td>
+                    <td class="py-2 px-2 text-center font-mono">{{ ((ensembleComparison?.diabetes?.single?.f1 || 0) * 100).toFixed(1) }}%</td>
+                    <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ ((ensembleComparison?.diabetes?.ensemble?.f1 || 0) * 100).toFixed(1) }}%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-slate-100">
+          <p class="text-xs text-slate-400">融合模型采用 Stacking 集成策略，第一层由 LightGBM 和 XGBoost 组成，第二层使用元学习器融合基学习器输出。绿色高亮数值为融合模型结果。</p>
+        </div>
+      </div>
+    </div>
+    <div v-else class="mb-4">
+      <div class="card p-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 bg-medical-100 rounded-lg flex items-center justify-center">
+            <span class="text-medical-600 text-sm">🏆</span>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold text-slate-800">模型性能对比</h3>
+            <p class="text-xs text-slate-500">单一 LightGBM 模型 vs Stacking 融合模型</p>
+          </div>
+        </div>
+        <button @click="loadEnsembleComparison" :disabled="ensembleLoading" class="btn-secondary text-sm">
+          {{ ensembleLoading ? '加载中...' : '加载对比数据' }}
+        </button>
       </div>
     </div>
 

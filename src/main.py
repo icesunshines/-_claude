@@ -38,11 +38,14 @@ from auth import (
 from predict import (
     predict_blood_sugar,
     predict_diabetes_from_request,
+    predict_blood_sugar_ensemble,
+    predict_diabetes_ensemble_from_request,
     get_blood_sugar_stats,
     get_diabetes_stats,
     get_feature_importance,
     get_stats_overview,
     get_blood_sugar_feature_means,
+    get_ensemble_comparison,
 )
 from preprocessing import load_metrics_meta
 from schemas import (
@@ -154,6 +157,36 @@ def api_predict_diabetes(request: DiabetesRequest):
     data = request.model_dump(exclude_none=True)
     result = predict_diabetes_from_request(data)
     return DiabetesResponse(**result)
+
+
+# ==================== Stacking 融合预测接口 ====================
+# 该区域用于展示论文中的集成学习优化效果，
+# 前端可通过单模型/融合模型切换直接对比预测结果。
+
+@app.post('/api/predict/blood-sugar-ensemble', response_model=BloodSugarResponse)
+def api_predict_blood_sugar_ensemble(request: BloodSugarRequest):
+    """血糖融合预测接口 (Stacking: LightGBM + XGBoost)"""
+    data = request.model_dump()
+    result = predict_blood_sugar_ensemble(data)
+    return BloodSugarResponse(**result)
+
+
+@app.post('/api/predict/diabetes-ensemble', response_model=DiabetesResponse)
+def api_predict_diabetes_ensemble(request: DiabetesRequest):
+    """糖尿病融合预测接口 (Stacking: LightGBM + XGBoost)"""
+    data = request.model_dump(exclude_none=True)
+    result = predict_diabetes_ensemble_from_request(data)
+    return DiabetesResponse(**result)
+
+
+@app.get('/api/stats/ensemble-comparison')
+def api_ensemble_comparison():
+    """单一模型 vs 融合模型效果对比
+
+    供前端 Dashboard 和 Predict 页的模型对比面板使用，
+    数据来源为训练脚本写入的 model_metrics.json 顶层 ensemble 指标。
+    """
+    return get_ensemble_comparison()
 
 
 # ==================== 统计接口 ====================

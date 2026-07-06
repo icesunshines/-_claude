@@ -55,7 +55,7 @@ onMounted(() => {
   </div>
 
   <!-- 其他页面：顶栏 + 内容区 -->
-  <div v-else class="min-h-screen bg-slate-50">
+  <div v-else class="h-screen bg-slate-50 flex flex-col">
     <!-- 顶部导航栏 -->
     <header class="fixed top-0 left-0 right-0 h-14 bg-white/90 backdrop-blur-xl border-b border-slate-200 z-50">
       <div class="h-full flex items-center justify-between px-4 lg:px-6">

@@ -85,6 +85,24 @@ export async function predictDiabetes(data) {
   return res.data
 }
 
+export async function predictBloodSugarEnsemble(data) {
+  // 血糖融合预测：Stacking 集成 LightGBM + XGBoost
+  const res = await api.post('/predict/blood-sugar-ensemble', data)
+  return res.data
+}
+
+export async function predictDiabetesEnsemble(data) {
+  // 糖尿病融合预测：Stacking 集成 LightGBM + XGBoost
+  const res = await api.post('/predict/diabetes-ensemble', data)
+  return res.data
+}
+
+export async function getEnsembleComparison() {
+  // 获取单模型 vs 融合模型对比指标，供前端对比表格使用
+  const res = await api.get('/stats/ensemble-comparison')
+  return res.data
+}
+
 export async function saveHistory(data) {
   const res = await api.post('/history', data)
   return res.data

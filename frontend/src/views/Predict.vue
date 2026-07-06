@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { predictBloodSugar, predictDiabetes, getBloodSugarMeans, saveHistory, getStatsOverview, getDiabetesStats, getFeatureImportance } from '../api/request'
+import { predictBloodSugar, predictDiabetes, predictBloodSugarEnsemble, predictDiabetesEnsemble, getBloodSugarMeans, saveHistory, getStatsOverview, getDiabetesStats, getFeatureImportance, getEnsembleComparison } from '../api/request'
 import { Loading, CircleCheck, Warning, Refresh, MagicStick, DataLine, TrendCharts, ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import FeatureBarChart from '../components/Charts/FeatureBarChart.vue'
@@ -141,6 +141,12 @@ const featureData = ref(null)
 const activeResultTab = ref('result')
 const expandedGroups = ref([true, true, true, false, false, false])
 
+// 融合模型状态
+const useEnsemble = ref(false)
+const useEnsembleDiabetes = ref(false)
+const ensembleComparison = ref(null)
+const ensembleLoading = ref(false)
+
 async function loadModelInfo() {
   try {
     const [overviewData, dmStats, fiData] = await Promise.all([
@@ -211,14 +217,16 @@ async function handleBloodSugarPredict() {
   loading.value = true
   bsResult.value = null
   try {
-    const data = await predictBloodSugar(bsForm.value)
+    const data = useEnsemble.value
+      ? await predictBloodSugarEnsemble(bsForm.value)
+      : await predictBloodSugar(bsForm.value)
     bsResult.value = data
     await saveHistory({
       type: 'blood_sugar',
       input: { ...bsForm.value },
-      result: data
+      result: { ...data, model_type: useEnsemble.value ? 'ensemble' : 'single' }
     })
-    ElMessage.success('预测完成')
+    ElMessage.success(useEnsemble.value ? '融合模型预测完成' : '预测完成')
   } catch (e) {
     ElMessage.error('预测失败，请检查输入数据')
   } finally {
@@ -231,18 +239,46 @@ async function handleDiabetesPredict() {
   loading.value = true
   dmResult.value = null
   try {
-    const data = await predictDiabetes(dmForm.value)
+    const data = useEnsembleDiabetes.value
+      ? await predictDiabetesEnsemble(dmForm.value)
+      : await predictDiabetes(dmForm.value)
     dmResult.value = data
     await saveHistory({
       type: 'diabetes',
       input: { ...dmForm.value },
-      result: data
+      result: { ...data, model_type: useEnsembleDiabetes.value ? 'ensemble' : 'single' }
     })
-    ElMessage.success('预测完成')
+    ElMessage.success(useEnsembleDiabetes.value ? '融合模型预测完成' : '预测完成')
   } catch (e) {
     ElMessage.error('预测失败，请检查输入数据')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadEnsembleComparison() {
+  if (ensembleComparison.value) return
+  ensembleLoading.value = true
+  try {
+    ensembleComparison.value = await getEnsembleComparison()
+  } catch (e) {
+    console.error('加载模型对比数据失败:', e)
+    ensembleComparison.value = null
+  } finally {
+    ensembleLoading.value = false
+  }
+}
+
+function getEnsembleMetrics() {
+  const comparison = ensembleComparison.value
+  if (!comparison) return null
+  const bsMetrics = comparison?.blood_sugar || {}
+  const dmMetrics = comparison?.diabetes || {}
+  return {
+    bsSingle: bsMetrics?.single || {},
+    bsEnsemble: bsMetrics?.ensemble || {},
+    dmSingle: dmMetrics?.single || {},
+    dmEnsemble: dmMetrics?.ensemble || {},
   }
 }
 
@@ -443,6 +479,13 @@ function resetDiabetesForm() {
           </div>
 
           <div class="mt-8 pt-6 border-t-2 border-slate-100">
+            <div class="flex items-center justify-between mb-4">
+              <div class="text-sm text-slate-600 font-medium">模型选择</div>
+              <el-radio-group v-model="useEnsemble" size="small">
+                <el-radio-button :value="false">单模型 (LightGBM)</el-radio-button>
+                <el-radio-button :value="true">融合模型 (LightGBM + XGBoost)</el-radio-button>
+              </el-radio-group>
+            </div>
             <button
               @click="handleBloodSugarPredict"
               :disabled="loading"
@@ -451,7 +494,7 @@ function resetDiabetesForm() {
               <el-icon v-if="loading" class="animate-spin">
                 <Loading />
               </el-icon>
-              {{ loading ? '预测中...' : '开始预测' }}
+              {{ loading ? '预测中...' : (useEnsemble ? '融合模型预测' : '开始预测') }}
             </button>
           </div>
         </div>
@@ -461,7 +504,15 @@ function resetDiabetesForm() {
       <div class="lg:col-span-1">
         <div v-if="bsResult" class="card p-5 animate-slide-up">
           <div class="flex items-center justify-between mb-4 gap-2">
-            <h3 class="text-base font-bold text-slate-800 truncate">预测结果</h3>
+            <div class="flex items-center gap-2 min-w-0">
+              <h3 class="text-base font-bold text-slate-800 truncate">预测结果</h3>
+              <span
+                class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold flex-shrink-0"
+                :class="useEnsemble ? 'bg-medical-50 text-medical-700 border border-medical-200' : 'bg-slate-50 text-slate-600 border border-slate-200'"
+              >
+                {{ useEnsemble ? '融合模型' : '单模型' }}
+              </span>
+            </div>
             <div class="inline-flex bg-slate-100 p-1 rounded-xl flex-shrink-0">
               <button
                 @click="activeResultTab = 'result'"
@@ -470,6 +521,13 @@ function resetDiabetesForm() {
                   activeResultTab === 'result' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 ]"
               >预测结果</button>
+              <button
+                @click="activeResultTab = 'comparison'"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                  activeResultTab === 'comparison' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                ]"
+              >模型对比</button>
               <button
                 @click="activeResultTab = 'features'"
                 :class="[
@@ -556,6 +614,53 @@ function resetDiabetesForm() {
             </div>
           </div>
 
+          <!-- 模型对比 tab -->
+          <div v-else-if="activeResultTab === 'comparison'" class="space-y-4">
+            <div v-if="!ensembleComparison" class="text-center py-6">
+              <p class="text-sm text-slate-500 mb-3">加载模型对比数据...</p>
+              <button @click="loadEnsembleComparison" :disabled="ensembleLoading" class="btn-secondary text-sm">
+                {{ ensembleLoading ? '加载中...' : '重新加载对比数据' }}
+              </button>
+            </div>
+            <div v-else-if="getEnsembleMetrics()" class="space-y-4">
+              <div class="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                <h4 class="text-sm font-bold text-slate-700 mb-3">血糖预测模型对比 (RMSE / R²)</h4>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="border-b border-slate-200">
+                        <th class="text-left py-2 px-2 text-slate-500 font-medium">指标</th>
+                        <th class="text-center py-2 px-2 text-slate-600 font-medium">单模型 (LightGBM)</th>
+                        <th class="text-center py-2 px-2 text-medical-700 font-medium">融合模型 (Stacking)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr class="border-b border-slate-100">
+                        <td class="py-2 px-2 text-slate-600">RMSE</td>
+                        <td class="py-2 px-2 text-center font-mono">{{ getEnsembleMetrics().bsSingle.rmse ?? '--' }}</td>
+                        <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ getEnsembleMetrics().bsEnsemble.rmse ?? '--' }}</td>
+                      </tr>
+                      <tr class="border-b border-slate-100">
+                        <td class="py-2 px-2 text-slate-600">R²</td>
+                        <td class="py-2 px-2 text-center font-mono">{{ getEnsembleMetrics().bsSingle.r2 ?? '--' }}</td>
+                        <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ getEnsembleMetrics().bsEnsemble.r2 ?? '--' }}</td>
+                      </tr>
+                      <tr>
+                        <td class="py-2 px-2 text-slate-600">MAE</td>
+                        <td class="py-2 px-2 text-center font-mono">{{ getEnsembleMetrics().bsSingle.mae ?? '--' }}</td>
+                        <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ getEnsembleMetrics().bsEnsemble.mae ?? '--' }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="text-xs text-slate-400 mt-3">融合模型通过 Stacking 集成 LightGBM + XGBoost，期望在 RMSE 和 R² 上优于单模型</p>
+              </div>
+            </div>
+            <div v-else class="text-center py-6">
+              <p class="text-sm text-slate-500">暂无对比数据，请先训练融合模型</p>
+            </div>
+          </div>
+
           <!-- 特征解释 tab -->
           <div v-else class="space-y-4">
             <div class="bg-slate-50 rounded-xl p-4 border border-slate-100">
@@ -618,6 +723,13 @@ function resetDiabetesForm() {
           </div>
 
           <div class="mt-8 pt-6 border-t-2 border-slate-100">
+            <div class="flex items-center justify-between mb-4">
+              <div class="text-sm text-slate-600 font-medium">模型选择</div>
+              <el-radio-group v-model="useEnsembleDiabetes" size="small">
+                <el-radio-button :value="false">单模型 (LightGBM)</el-radio-button>
+                <el-radio-button :value="true">融合模型 (LightGBM + XGBoost)</el-radio-button>
+              </el-radio-group>
+            </div>
             <button
               @click="handleDiabetesPredict"
               :disabled="loading"
@@ -626,7 +738,7 @@ function resetDiabetesForm() {
               <el-icon v-if="loading" class="animate-spin">
                 <Loading />
               </el-icon>
-              {{ loading ? '预测中...' : '开始预测' }}
+              {{ loading ? '预测中...' : (useEnsembleDiabetes ? '融合模型预测' : '开始预测') }}
             </button>
           </div>
         </div>
@@ -636,7 +748,15 @@ function resetDiabetesForm() {
       <div class="lg:col-span-1">
         <div v-if="dmResult" class="card p-5 animate-slide-up">
           <div class="flex items-center justify-between mb-4 gap-2">
-            <h3 class="text-base font-bold text-slate-800 truncate">预测结果</h3>
+            <div class="flex items-center gap-2 min-w-0">
+              <h3 class="text-base font-bold text-slate-800 truncate">预测结果</h3>
+              <span
+                class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold flex-shrink-0"
+                :class="useEnsembleDiabetes ? 'bg-medical-50 text-medical-700 border border-medical-200' : 'bg-slate-50 text-slate-600 border border-slate-200'"
+              >
+                {{ useEnsembleDiabetes ? '融合模型' : '单模型' }}
+              </span>
+            </div>
             <div class="inline-flex bg-slate-100 p-1 rounded-xl flex-shrink-0">
               <button
                 @click="activeResultTab = 'result'"
@@ -645,6 +765,13 @@ function resetDiabetesForm() {
                   activeResultTab === 'result' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 ]"
               >预测结果</button>
+              <button
+                @click="activeResultTab = 'comparison'"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                  activeResultTab === 'comparison' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                ]"
+              >模型对比</button>
               <button
                 @click="activeResultTab = 'model'"
                 :class="[
@@ -704,6 +831,63 @@ function resetDiabetesForm() {
                   {{ getDmInterpretation(dmResult.probability) }}
                 </p>
               </div>
+            </div>
+          </div>
+
+          <!-- 模型对比 tab -->
+          <div v-else-if="activeResultTab === 'comparison'" class="space-y-4">
+            <div v-if="!ensembleComparison" class="text-center py-6">
+              <p class="text-sm text-slate-500 mb-3">加载模型对比数据...</p>
+              <button @click="loadEnsembleComparison" :disabled="ensembleLoading" class="btn-secondary text-sm">
+                {{ ensembleLoading ? '加载中...' : '重新加载对比数据' }}
+              </button>
+            </div>
+            <div v-else-if="getEnsembleMetrics()" class="space-y-4">
+              <div class="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                <h4 class="text-sm font-bold text-slate-700 mb-3">糖尿病预测模型对比 (AUC / Accuracy / F1)</h4>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="border-b border-slate-200">
+                        <th class="text-left py-2 px-2 text-slate-500 font-medium">指标</th>
+                        <th class="text-center py-2 px-2 text-slate-600 font-medium">单模型 (LightGBM)</th>
+                        <th class="text-center py-2 px-2 text-medical-700 font-medium">融合模型 (Stacking)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr class="border-b border-slate-100">
+                        <td class="py-2 px-2 text-slate-600">AUC</td>
+                        <td class="py-2 px-2 text-center font-mono">{{ (getEnsembleMetrics().dmSingle.auc * 100)?.toFixed(1) ?? '--' }}%</td>
+                        <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ (getEnsembleMetrics().dmEnsemble.auc * 100)?.toFixed(1) ?? '--' }}%</td>
+                      </tr>
+                      <tr class="border-b border-slate-100">
+                        <td class="py-2 px-2 text-slate-600">Accuracy</td>
+                        <td class="py-2 px-2 text-center font-mono">{{ (getEnsembleMetrics().dmSingle.accuracy * 100)?.toFixed(1) ?? '--' }}%</td>
+                        <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ (getEnsembleMetrics().dmEnsemble.accuracy * 100)?.toFixed(1) ?? '--' }}%</td>
+                      </tr>
+                      <tr class="border-b border-slate-100">
+                        <td class="py-2 px-2 text-slate-600">Precision</td>
+                        <td class="py-2 px-2 text-center font-mono">{{ (getEnsembleMetrics().dmSingle.precision * 100)?.toFixed(1) ?? '--' }}%</td>
+                        <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ (getEnsembleMetrics().dmEnsemble.precision * 100)?.toFixed(1) ?? '--' }}%</td>
+                      </tr>
+                      <tr class="border-b border-slate-100">
+                        <td class="py-2 px-2 text-slate-600">Recall</td>
+                        <td class="py-2 px-2 text-center font-mono">{{ (getEnsembleMetrics().dmSingle.recall * 100)?.toFixed(1) ?? '--' }}%</td>
+                        <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ (getEnsembleMetrics().dmEnsemble.recall * 100)?.toFixed(1) ?? '--' }}%</td>
+                      </tr>
+                      <tr>
+                        <td class="py-2 px-2 text-slate-600">F1</td>
+                        <td class="py-2 px-2 text-center font-mono">{{ (getEnsembleMetrics().dmSingle.f1 * 100)?.toFixed(1) ?? '--' }}%</td>
+                        <td class="py-2 px-2 text-center font-mono text-medical-700 font-bold">{{ (getEnsembleMetrics().dmEnsemble.f1 * 100)?.toFixed(1) ?? '--' }}%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="text-xs text-slate-400 mt-3">融合模型通过 Stacking 集成 LightGBM + XGBoost，期望在 AUC 和 F1 上优于单模型</p>
+              </div>
+            </div>
+            <div v-else class="text-center py-6">
+              <p class="text-sm text-slate-500">暂无对比数据，请先训练融合模型</p>
             </div>
           </div>
 

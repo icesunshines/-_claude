@@ -31,6 +31,13 @@ from preprocessing import (
     save_metrics_meta,
     save_pipeline,
 )
+from ensemble import (
+    predict_stacked_blood_sugar,
+    predict_stacked_diabetes,
+    save_ensemble_models,
+    train_stacked_blood_sugar,
+    train_stacked_diabetes,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(BASE_DIR, 'models')
@@ -304,6 +311,95 @@ if __name__ == '__main__':
     print('#' * 60)
     _, dm_pipeline, dm_val, dm_test, dm_val_roc, dm_val_cm, dm_test_roc, dm_test_cm = train_diabetes_model()
 
+    # ========== 准备融合训练数据 ==========
+    # 从预处理管道获取训练数据（用于融合模型训练）
+    print()
+    print('#' * 60)
+    print('# 准备融合训练数据')
+    print('#' * 60)
+
+    # 血糖预处理
+    print('加载初赛数据用于融合训练...')
+    bs_train_df = pd.read_csv(
+        os.path.join(DATA_DIR, 'initial', 'd_train_20180102.csv'),
+        encoding='gbk',
+    )
+    bs_X, bs_y, _ = fit_initial_pipeline(bs_train_df)
+    bs_train_full, bs_test_full = train_test_split(
+        bs_train_df, test_size=0.2, random_state=42,
+    )
+    bs_X_full, _ = bs_pipeline.transform_df(bs_train_full, has_label=False)
+    bs_y_full = bs_train_full['血糖'].astype(float)
+    bs_X_test, _ = bs_pipeline.transform_df(bs_test_full, has_label=False)
+    bs_y_test = bs_test_full['血糖'].astype(float)
+
+    # 糖尿病预处理
+    print('加载复赛数据用于融合训练...')
+    dm_train_df = pd.read_csv(
+        os.path.join(DATA_DIR, 'final', 'f_train_20180204.csv'),
+        encoding='gbk',
+    )
+    dm_X, dm_y, _ = fit_final_pipeline(dm_train_df)
+    dm_train_full, dm_test_full = train_test_split(
+        dm_train_df, test_size=0.2, random_state=42, stratify=dm_train_df['label'],
+    )
+    dm_X_full, _ = dm_pipeline.transform_df(dm_train_full, has_label=False)
+    dm_y_full = dm_train_full['label'].astype(int)
+    dm_X_test, _ = dm_pipeline.transform_df(dm_test_full, has_label=False)
+    dm_y_test = dm_test_full['label'].astype(int)
+
+    # ========== Stacking 融合模型训练 ==========
+    print()
+    print('#' * 60)
+    print('# Stacking 融合模型训练')
+    print('#' * 60)
+
+    # 血糖融合
+    print()
+    print('训练血糖融合模型...')
+    bs_ensemble_models, bs_ensemble_metrics = train_stacked_blood_sugar(bs_X_full, bs_y_full)
+    bs_ensemble_path = save_ensemble_models(
+        bs_ensemble_models, bs_ensemble_metrics, 'blood_sugar'
+    )
+    print(f'  模型已保存: {bs_ensemble_path}')
+
+    # 用官方测试集评估（融合模型已经在训练集上做了OOF评估）
+    test_pred_stacked = predict_stacked_blood_sugar(bs_X_test, bs_ensemble_models)
+    test_metrics_stacked = _evaluate_regression(bs_y_test, test_pred_stacked)
+
+    print('  血糖融合模型 - OOF评估:')
+    print(f'    RMSE: {bs_ensemble_metrics["oof_rmse"]}, R2: {bs_ensemble_metrics["oof_r2"]}')
+    print('  血糖融合模型 - 官方测试集:')
+    for k, v in test_metrics_stacked.items():
+        print(f'    {k}: {v}')
+
+    bs_ensemble_metrics['test'] = test_metrics_stacked
+
+    # 糖尿病融合
+    print()
+    print('训练糖尿病融合模型...')
+    dm_ensemble_models, dm_ensemble_metrics = train_stacked_diabetes(dm_X_full, dm_y_full)
+    dm_ensemble_path = save_ensemble_models(
+        dm_ensemble_models, dm_ensemble_metrics, 'diabetes'
+    )
+    print(f'  模型已保存: {dm_ensemble_path}')
+
+    # 用官方测试集评估（融合模型已经在训练集上做了OOF评估）
+    test_prob_stacked = predict_stacked_diabetes(dm_X_test, dm_ensemble_models)
+    test_result_stacked = _evaluate_classification(dm_y_test, test_prob_stacked)
+    test_metrics_dm_stacked = {k: v for k, v in test_result_stacked.items() if k not in ('roc_curve', 'confusion_matrix')}
+
+    print('  糖尿病融合模型 - OOF评估:')
+    print(f'    AUC: {dm_ensemble_metrics["oof_auc"]}, F1: {dm_ensemble_metrics["oof_f1"]}')
+    print('  糖尿病融合模型 - 官方测试集:')
+    for k, v in test_metrics_dm_stacked.items():
+        print(f'    {k}: {v}')
+
+    dm_ensemble_metrics['test'] = test_metrics_dm_stacked
+
+    # 汇总所有指标
+    # 关键点：blood_sugar_ensemble / diabetes_ensemble 单独存为顶层键，
+    # 供前端和 Dashboard 的模型对比模块直接读取。
     all_metrics = {
         'blood_sugar': {
             'feature_count': len(bs_pipeline.feature_cols),
@@ -319,6 +415,8 @@ if __name__ == '__main__':
             'validation_roc_curve': dm_val_roc,
             'validation_confusion_matrix': dm_val_cm,
         },
+        'blood_sugar_ensemble': bs_ensemble_metrics,
+        'diabetes_ensemble': dm_ensemble_metrics,
     }
     save_metrics_meta(all_metrics)
     print()
