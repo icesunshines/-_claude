@@ -447,7 +447,7 @@ async function deleteSession(sessionId) {
         </div>
 
         <!-- 输入区 -->
-        <div class="border-t border-slate-200 px-3 py-2.5 bg-white flex-shrink-0">
+        <div class="border-t border-slate-100 px-4 py-3 bg-white flex-shrink-0">
           <div class="flex gap-2">
             <input
               v-model="input"
@@ -460,7 +460,7 @@ async function deleteSession(sessionId) {
             <button
               @click="sendMessage"
               :disabled="loading"
-              class="btn-primary px-4 flex items-center gap-1.5 text-sm py-2.5"
+              class="btn-primary px-4 flex items-center gap-1.5 text-sm py-2.5 hover:-translate-y-0.5 active:translate-y-0 transition-transform"
             >
               <el-icon :size="16"><Promotion /></el-icon>
               <span>发送</span>
