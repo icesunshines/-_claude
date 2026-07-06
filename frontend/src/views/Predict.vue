@@ -85,6 +85,8 @@ const bsGroups = [
   { title: '白细胞分类', fields: ['中性粒细胞百分比', '淋巴细胞百分比', '单核细胞百分比', '嗜酸细胞百分比', '嗜碱细胞百分比'] }
 ]
 
+const BS_INTEGER_FIELDS = new Set(['年龄'])
+
 const bsInterpretation = {
   '正常': '当前血糖水平处于正常范围。建议保持健康饮食和规律运动，每年定期体检监测血糖变化。',
   '偏高': '血糖略高于正常范围，提示糖耐量受损可能。建议减少高糖高脂饮食，增加运动量，3-6 个月后复查空腹血糖和糖化血红蛋白。',
@@ -108,17 +110,17 @@ function getDmInterpretation(probability) {
 }
 
 const dmFields = [
-  { key: '年龄', label: '年龄' },
-  { key: '孕次', label: '孕次' },
-  { key: '产次', label: '产次' },
-  { key: '身高', label: '身高 (cm)' },
+  { key: '年龄', label: '年龄', integer: true },
+  { key: '孕次', label: '孕次', integer: true },
+  { key: '产次', label: '产次', integer: true },
+  { key: '身高', label: '身高 (cm)', integer: true },
   { key: '孕前体重', label: '孕前体重 (kg)' },
   { key: '孕前BMI', label: '孕前 BMI' },
-  { key: 'BMI分类', label: 'BMI 分类' },
-  { key: '收缩压', label: '收缩压 (mmHg)' },
-  { key: '舒张压', label: '舒张压 (mmHg)' },
-  { key: '糖筛孕周', label: '糖筛孕周' },
-  { key: 'wbc', label: '白细胞 WBC' },
+  { key: 'BMI分类', label: 'BMI 分类', integer: true },
+  { key: '收缩压', label: '收缩压 (mmHg)', integer: true },
+  { key: '舒张压', label: '舒张压 (mmHg)', integer: true },
+  { key: '糖筛孕周', label: '糖筛孕周', integer: true },
+  { key: 'wbc', label: '白细胞 WBC', integer: true },
   { key: 'ALT', label: 'ALT' },
   { key: 'AST', label: 'AST' },
   { key: 'Cr', label: '肌酐 Cr' },
@@ -131,7 +133,7 @@ const dmFields = [
   { key: 'ApoB', label: 'ApoB' },
   { key: 'Lpa', label: 'Lp(a)' },
   { key: 'hsCRP', label: 'hsCRP' },
-  { key: 'DM家族史', label: '糖尿病家族史 (0/1)' }
+  { key: 'DM家族史', label: '糖尿病家族史 (0/1)', integer: true }
 ]
 
 const diabetesMetrics = ref(null)
@@ -174,6 +176,14 @@ function validateBloodSugarForm() {
   return true
 }
 
+function coerceBloodSugarIntegers() {
+  for (const field of BS_INTEGER_FIELDS) {
+    if (bsForm.value[field] !== null && bsForm.value[field] !== '') {
+      bsForm.value[field] = Math.round(Number(bsForm.value[field]))
+    }
+  }
+}
+
 function validateDiabetesForm() {
   const required = ['年龄', '身高', '孕前体重']
   for (const field of required) {
@@ -197,6 +207,7 @@ async function fillBloodSugarMeans() {
 
 async function handleBloodSugarPredict() {
   if (!validateBloodSugarForm()) return
+  coerceBloodSugarIntegers()
   loading.value = true
   bsResult.value = null
   try {
@@ -420,7 +431,7 @@ function resetDiabetesForm() {
                     <input
                       v-else
                       type="number"
-                      step="0.01"
+                      :step="BS_INTEGER_FIELDS.has(field) ? 1 : 0.01"
                       v-model.number="bsForm[field]"
                       class="input-field"
                       :placeholder="`请输入 ${field}`"
@@ -598,7 +609,7 @@ function resetDiabetesForm() {
               <label class="text-sm font-semibold text-slate-600">{{ field.label }}</label>
               <input
                 type="number"
-                step="0.01"
+                :step="field.integer ? 1 : 0.01"
                 v-model.number="dmForm[field.key]"
                 class="input-field"
                 :placeholder="`请输入 ${field.label}`"

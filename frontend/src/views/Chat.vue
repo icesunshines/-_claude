@@ -2,7 +2,7 @@
 import { ref, nextTick, onMounted } from 'vue'
 import { chat } from '../api/request'
 import { ChatDotRound, Promotion, User, Refresh, MagicStick, Document, Menu, Close } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 
 marked.setOptions({
@@ -17,6 +17,7 @@ const messagesContainer = ref(null)
 const currentSessionId = ref(null)
 const sessions = ref([])
 const showSidebar = ref(true)
+const creatingSession = ref(false)
 
 const quickQuestions = [
   '如何预防糖尿病？',
@@ -38,6 +39,11 @@ function scrollToBottom() {
 onMounted(async () => {
   scrollToBottom()
   await loadSessions()
+  if (sessions.value.length === 0) {
+    await ensureCurrentSession()
+  } else if (!currentSessionId.value) {
+    await loadSession(sessions.value[0].id)
+  }
 })
 
 async function loadSessions() {
@@ -47,15 +53,36 @@ async function loadSessions() {
     })
     if (res.ok) {
       sessions.value = await res.json()
-      if (sessions.value.length > 0) {
-        await loadSession(sessions.value[0].id)
-      } else {
-        await createNewSession()
-      }
     }
   } catch (e) {
     console.error('加载会话列表失败:', e)
   }
+}
+
+async function ensureCurrentSession() {
+  if (currentSessionId.value) {
+    return currentSessionId.value
+  }
+
+  await loadSessions()
+  const blankSession = sessions.value.find(s => s.title === '新对话')
+  if (blankSession) {
+    await loadSession(blankSession.id)
+    return blankSession.id
+  }
+
+  const res = await fetch('/api/chat/sessions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+  })
+  if (res.ok) {
+    const session = await res.json()
+    await loadSessions()
+    await loadSession(session.id)
+    return session.id
+  }
+
+  return null
 }
 
 async function loadSession(sessionId) {
@@ -81,24 +108,64 @@ async function loadSession(sessionId) {
 }
 
 async function createNewSession() {
+  if (creatingSession.value) return
+  creatingSession.value = true
   try {
-    const res = await fetch('/api/chat/sessions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    })
-    if (res.ok) {
-      const session = await res.json()
-      await loadSessions()
-      await loadSession(session.id)
+    await loadSessions()
+    console.log('[Chat] createNewSession, sessions:', sessions.value.map(s => s.title))
+
+    // 优先复用已有的空白"新对话"
+    const blankSession = sessions.value.find(s => s.title === '新对话')
+    console.log('[Chat] blankSession:', blankSession)
+    if (blankSession) {
+      // 如果当前已经是这个空白会话且无消息，直接返回
+      if (currentSessionId.value === blankSession.id && messages.value.length === 0) {
+        return
+      }
+      // 尝试加载这个空白会话，如果失败则创建新的
+      const prevSessionId = currentSessionId.value
+      await loadSession(blankSession.id)
+      // loadSession 失败时 currentSessionId 不会变，需要创建新的
+      if (!currentSessionId.value) {
+        return await _doCreateSession()
+      }
+      return
     }
-  } catch (e) {
-    console.error('创建会话失败:', e)
+
+    // 没有空白会话时创建新的
+    return await _doCreateSession()
+  } finally {
+    creatingSession.value = false
+  }
+}
+
+async function _doCreateSession() {
+  const res = await fetch('/api/chat/sessions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+  })
+  if (res.ok) {
+    const session = await res.json()
+    await loadSessions()
+    await loadSession(session.id)
   }
 }
 
 async function sendMessage() {
   if (!input.value.trim() || loading.value) return
 
+  // 确保有当前会话
+  if (!currentSessionId.value) {
+    console.log('[Chat] 当前无会话，开始创建...')
+    await createNewSession()
+    // 如果创建/加载仍然失败，不再发送
+    if (!currentSessionId.value) {
+      ElMessage.error('请先创建或选择一个对话')
+      return
+    }
+  }
+
+  console.log('[Chat] 发送消息, session_id:', currentSessionId.value)
   const userMessageText = input.value.trim()
   input.value = ''
 
@@ -113,10 +180,11 @@ async function sendMessage() {
   scrollToBottom()
 
   loading.value = true
+  // 快照当前会话ID，防止并发问题
+  const activeSessionId = currentSessionId.value
+  const token = localStorage.getItem('token')
 
   try {
-    const token = localStorage.getItem('token')
-
     const response = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: {
@@ -125,7 +193,7 @@ async function sendMessage() {
       },
       body: JSON.stringify({
         message: userMessageText,
-        session_id: currentSessionId.value
+        session_id: activeSessionId
       })
     })
 
@@ -170,6 +238,15 @@ async function sendMessage() {
         }
       }
     }
+
+    if (currentSessionId.value === activeSessionId) {
+      const trimmed = userMessageText.slice(0, 20) + (userMessageText.length > 20 ? '...' : '')
+      const session = sessions.value.find(s => s.id === currentSessionId.value)
+      if (session && session.title === '新对话') {
+        session.title = trimmed
+      }
+      await loadSessions()
+    }
   } catch (e) {
     console.error('发送消息失败:', e)
     ElMessage.error('发送消息失败，请稍后重试')
@@ -199,7 +276,19 @@ function clearChat() {
 
 async function deleteSession(sessionId) {
   try {
-    // TODO: 后端实现删除接口
+    await ElMessageBox.confirm('确定删除该对话吗？删除后将无法恢复。', '删除对话', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    const res = await fetch(`/api/chat/sessions/${sessionId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || '删除失败')
+    }
     sessions.value = sessions.value.filter(s => s.id !== sessionId)
     if (currentSessionId.value === sessionId) {
       if (sessions.value.length > 0) {
@@ -208,8 +297,12 @@ async function deleteSession(sessionId) {
         await createNewSession()
       }
     }
+    ElMessage.success('对话已删除')
   } catch (e) {
-    console.error('删除会话失败:', e)
+    if (e !== 'cancel') {
+      console.error('删除会话失败:', e)
+      ElMessage.error('删除失败')
+    }
   }
 }
 </script>
@@ -217,7 +310,7 @@ async function deleteSession(sessionId) {
 <template>
   <div class="chat-page flex gap-0">
     <!-- 左侧会话列表 -->
-    <div v-if="showSidebar" class="sidebar w-64 bg-slate-50 border-r border-slate-200 flex flex-col">
+    <div v-if="showSidebar" class="sidebar w-64 bg-slate-50 border-r border-slate-200 flex flex-col min-h-0">
       <div class="p-4 border-b border-slate-200">
         <button @click="createNewSession" class="w-full btn-primary flex items-center justify-center gap-2">
           <el-icon><Document /></el-icon>
@@ -246,9 +339,9 @@ async function deleteSession(sessionId) {
     </div>
 
     <!-- 右侧聊天区域 -->
-    <div class="flex-1 flex flex-col">
-      <div class="card p-0 overflow-hidden h-screen flex flex-col">
-        <div class="bg-gradient-to-r from-primary-500 to-medical-500 p-4 text-white flex items-center justify-between">
+    <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <div class="p-0 overflow-hidden flex flex-col min-h-0 flex-1 bg-white rounded-lg">
+        <div class="bg-gradient-to-r from-primary-500 to-medical-500 p-4 text-white flex items-center justify-between flex-shrink-0">
           <div class="flex items-center gap-3">
             <button @click="showSidebar = !showSidebar" class="hover:bg-white/20 p-2 rounded-lg transition-colors">
               <el-icon :size="20"><Menu /></el-icon>
@@ -260,7 +353,7 @@ async function deleteSession(sessionId) {
           </div>
         </div>
 
-        <div class="bg-slate-50 p-3 border-b border-slate-200">
+        <div class="bg-slate-50 p-3 border-b border-slate-200 flex-shrink-0">
           <div class="flex flex-wrap gap-2">
             <button
               v-for="q in quickQuestions"
@@ -321,7 +414,7 @@ async function deleteSession(sessionId) {
           </div>
         </div>
 
-        <div class="border-t border-slate-200 p-3 bg-slate-50">
+        <div class="border-t border-slate-200 p-3 bg-slate-50 flex-shrink-0">
           <div class="flex gap-3">
             <input
               v-model="input"
@@ -350,7 +443,8 @@ async function deleteSession(sessionId) {
 .chat-page {
   max-width: 1600px;
   margin: 0 auto;
-  height: 100vh;
+  min-height: 0;
+  flex: 1;
 }
 
 .sidebar {

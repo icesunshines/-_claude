@@ -544,6 +544,18 @@ def get_chat_messages(session_id: int, current_user: User = Depends(get_current_
     return [{'role': m.role, 'content': m.content, 'created_at': m.created_at.strftime('%H:%M')} for m in messages]
 
 
+@app.delete('/api/chat/sessions/{session_id}')
+def delete_chat_session(session_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """删除会话及其消息"""
+    session = db.query(ChatSession).filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail='会话不存在')
+    db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete(synchronize_session=False)
+    db.delete(session)
+    db.commit()
+    return {'status': 'ok'}
+
+
 async def _chat_stream_generator(session_id, user_message: str, db: Session):
     """SSE 流式聊天生成器"""
     # 保存用户消息
@@ -600,13 +612,7 @@ async def api_chat_stream(request: ChatRequest, current_user: User = Depends(get
     user_message = data.get('message', '').strip()
 
     if not session_id:
-        session = ChatSession(user_id=current_user.id, title="新对话")
-        db.add(session)
-        db.commit()
-        db.refresh(session)
-        session_id = session.id
-    else:
-        session_id = session_id
+        raise HTTPException(status_code=400, detail='请先选择或创建一个对话')
 
     return StreamingResponse(
         _chat_stream_generator(session_id, user_message, db),

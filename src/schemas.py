@@ -101,6 +101,7 @@ class DiabetesResponse(BaseModel):
 class ChatRequest(BaseModel):
     """智能问答请求模型"""
     message: str = Field(..., description="用户提问")
+    session_id: int | None = Field(None, description="对话会话ID")
 
 
 class ChatResponse(BaseModel):

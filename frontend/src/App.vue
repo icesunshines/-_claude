@@ -146,9 +146,9 @@ onUnmounted(() => {
       </div>
     </aside>
 
-    <main 
+    <main
       :class="[
-        'transition-all duration-300 min-h-screen',
+        'transition-all duration-300 min-h-screen flex flex-col',
         sidebarOpen ? 'md:ml-72' : 'md:ml-20'
       ]"
     >
@@ -205,7 +205,7 @@ onUnmounted(() => {
         </div>
       </header>
 
-      <div class="p-6 md:p-8">
+      <div class="p-6 md:p-8 flex flex-col min-h-0 flex-1">
         <router-view />
       </div>
     </main>
