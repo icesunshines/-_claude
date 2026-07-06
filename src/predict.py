@@ -212,6 +212,16 @@ def get_diabetes_stats() -> Dict[str, Any]:
             'patient_mean': round(float(df[df['label'] == 1][col].mean()), 2),
         }
 
+    # 雷达图数据：6个临床指标的健康群体 vs 患者群体均值
+    radar_labels = ['年龄', '孕前BMI', '收缩压', '舒张压', '糖筛孕周', '空腹血糖']
+    radar_comparison = {}
+    for col in radar_labels:
+        if col in df.columns:
+            radar_comparison[col] = {
+                'healthy_mean': round(float(df[df['label'] == 0][col].mean()), 2),
+                'patient_mean': round(float(df[df['label'] == 1][col].mean()), 2),
+            }
+
     metrics = _load_metrics().get('diabetes', {}).get('validation', {})
     if not metrics:
         model = get_diabetes_model()
@@ -233,6 +243,7 @@ def get_diabetes_stats() -> Dict[str, Any]:
 
     return {
         'clinical_comparison': comparison,
+        'radar_comparison': radar_comparison,
         'model_metrics': metrics,
         'roc_curve': roc_data,
         'confusion_matrix': confusion,
