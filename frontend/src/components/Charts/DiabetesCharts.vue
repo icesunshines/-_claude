@@ -68,23 +68,13 @@ function initChart(stats) {
         type: 'bar',
         data: healthy,
         itemStyle: {
-          color: {
-            type: 'linear',
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: '#86efac' },
-              { offset: 1, color: '#22c55e' }
-            ]
-          },
-          borderRadius: [10, 10, 0, 0],
-          shadowColor: 'rgba(34, 197, 94, 0.3)',
-          shadowBlur: 10
+          color: '#22c55e',
+          borderRadius: [6, 6, 0, 0]
         },
-        barWidth: '35%',
+        barWidth: '40%',
         emphasis: {
           itemStyle: {
-            shadowColor: 'rgba(34, 197, 94, 0.5)',
-            shadowBlur: 15
+            color: '#16a34a'
           }
         }
       },
@@ -93,23 +83,13 @@ function initChart(stats) {
         type: 'bar',
         data: patient,
         itemStyle: {
-          color: {
-            type: 'linear',
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: '#fca5a5' },
-              { offset: 1, color: '#ef4444' }
-            ]
-          },
-          borderRadius: [10, 10, 0, 0],
-          shadowColor: 'rgba(239, 68, 68, 0.3)',
-          shadowBlur: 10
+          color: '#ef4444',
+          borderRadius: [6, 6, 0, 0]
         },
-        barWidth: '35%',
+        barWidth: '40%',
         emphasis: {
           itemStyle: {
-            shadowColor: 'rgba(239, 68, 68, 0.5)',
-            shadowBlur: 15
+            color: '#dc2626'
           }
         }
       }
