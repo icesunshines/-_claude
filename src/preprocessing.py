@@ -93,6 +93,12 @@ class InitialPipeline:
         X_raw = cleaned.drop(columns=[self.label_col])
         self.feature_cols = list(X_raw.columns)
 
+        # 处理全为 NaN 的列：imputer 会跳过这类列，导致后续形状不匹配
+        all_nan_cols = [col for col in self.feature_cols if X_raw[col].isna().all()]
+        if all_nan_cols:
+            X_raw = X_raw.drop(columns=all_nan_cols)
+            self.feature_cols = [c for c in self.feature_cols if c not in all_nan_cols]
+
         X_imputed = pd.DataFrame(
             self.imputer.fit_transform(X_raw),
             columns=self.feature_cols,
@@ -275,17 +281,29 @@ def preprocess_initial(df: pd.DataFrame) -> pd.DataFrame:
     """预处理初赛数据（用于统计展示，含血糖列，原始尺度）"""
     df = df.copy()
     df = df.drop(columns=[c for c in HEPATITIS_COLS if c in df.columns], errors='ignore')
-    if is_object_dtype(df['性别']):
+    if '性别' in df.columns and is_object_dtype(df['性别']):
         df['性别'] = df['性别'].map({'男': 0, '女': 1})
     df['性别'] = pd.to_numeric(df['性别'], errors='coerce')
     df = df.drop(columns=['id', '体检日期'], errors='ignore')
-    imputer = SimpleImputer(strategy='median')
+
+    # 选出数值列，排除标签列
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    df[numeric_cols] = imputer.fit_transform(df[numeric_cols])
     label_col = '血糖'
-    feature_cols = [c for c in numeric_cols if c != label_col]
-    scaler = StandardScaler()
-    df[feature_cols] = scaler.fit_transform(df[feature_cols])
+    if label_col in numeric_cols:
+        numeric_cols.remove(label_col)
+
+    # 排除全为 NaN 的列，避免 imputer 返回列数不匹配
+    valid_cols = [col for col in numeric_cols if not df[col].isna().all()]
+    if valid_cols != numeric_cols:
+        df = df.drop(columns=[c for c in numeric_cols if c not in valid_cols])
+        numeric_cols = valid_cols
+
+    if numeric_cols:
+        imputer = SimpleImputer(strategy='median')
+        df[numeric_cols] = imputer.fit_transform(df[numeric_cols])
+    if numeric_cols:
+        scaler = StandardScaler()
+        df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
     return df
 
 

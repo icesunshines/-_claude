@@ -1,17 +1,17 @@
 {
   "blood_sugar": {
-    "feature_count": 34,
+    "feature_count": 33,
     "validation": {
-      "mse": 1.6249,
-      "rmse": 1.2747,
-      "mae": 0.7127,
-      "r2": 0.1543
+      "mse": 1.6156,
+      "rmse": 1.2711,
+      "mae": 0.7211,
+      "r2": 0.1591
     },
     "test": {
-      "mse": 1.7768,
-      "rmse": 1.333,
-      "mae": 0.7395,
-      "r2": 0.1525
+      "mse": 1.793,
+      "rmse": 1.339,
+      "mae": 0.7665,
+      "r2": 0.1448
     }
   },
   "diabetes": {

@@ -151,7 +151,8 @@ def get_blood_sugar_stats() -> Dict[str, Any]:
         errors='ignore',
     )
     if raw_df['性别'].dtype == object:
-        raw_df['性别'] = raw_df['性别'].map({'男': '男', '女': '女'})
+        # 原始数据可能已为中文或需要映射
+        raw_df['性别'] = pd.Categorical(raw_df['性别'], categories=['男', '女'], ordered=True).codes  # 0=男, 1=女
 
     df_processed = preprocess_initial(df)
 
@@ -162,23 +163,30 @@ def get_blood_sugar_stats() -> Dict[str, Any]:
     distribution = {str(k): int(v) for k, v in dist.items()}
 
     gender_group = raw_df.groupby('性别')['血糖'].agg(['mean', 'std', 'count']).round(2)
-    gender_stats = {
-        str(idx): {
-            'mean': float(row['mean']),
-            'std': float(row['std']),
+    gender_stats = {}
+    for idx, row in gender_group.iterrows():
+        mean_val = row['mean'] if np.isfinite(row['mean']) else 0.0
+        std_val = row['std'] if np.isfinite(row['std']) else 0.0
+        gender_stats[str(idx)] = {
+            'mean': float(mean_val),
+            'std': float(std_val),
             'count': int(row['count']),
         }
-        for idx, row in gender_group.iterrows()
-    }
 
     raw_df['age_group'] = (raw_df['年龄'] // 10) * 10
     age_means = raw_df.groupby('age_group')['血糖'].mean().round(2)
-    age_stats = {str(k): float(v) for k, v in age_means.items()}
+    age_stats = {}
+    for k, v in age_means.items():
+        age_stats[str(k)] = float(v) if np.isfinite(v) else 0.0
 
     numeric_df = df_processed.select_dtypes(include=[np.number])
     corr = numeric_df.corr()['血糖'].drop('血糖', errors='ignore')
     corr = corr.abs().sort_values(ascending=False).head(10)
-    top_corr = {str(col): round(float(val), 3) for col, val in corr.items()}
+    top_corr = {}
+    for col, val in corr.items():
+        fval = float(val)
+        if np.isfinite(fval):
+            top_corr[str(col)] = round(fval, 3)
 
     return {
         'distribution': distribution,

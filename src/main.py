@@ -6,7 +6,12 @@ FastAPI 主入口
 
 import sys
 import os
+import uvicorn
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# 加载 .env 文件到环境变量
+from dotenv import load_dotenv
+load_dotenv()
 
 import json
 import asyncio
@@ -22,7 +27,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database import engine, get_db, Base
-from models_orm import User, PredictionHistory
+from models_orm import User, PredictionHistory, ChatSession, ChatMessage
 from auth import (
     get_password_hash,
     verify_password,
@@ -99,9 +104,9 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
     return UserResponse(
-        id=new_user.id,
-        username=new_user.username,
-        role=new_user.role,
+        id=new_user.id, # type: ignore
+        username=new_user.username, # type: ignore
+        role=new_user.role, # type: ignore
         created_at=new_user.created_at.strftime('%Y-%m-%d %H:%M'),
     )
 
@@ -109,20 +114,26 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 @app.post('/api/auth/login', response_model=TokenResponse)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """用户登录，返回 JWT token"""
+    print(f"[LOGIN] 尝试登录: username={form_data.username}")
     user = db.query(User).filter(User.username == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user:
+        print(f"[LOGIN] 用户不存在: {form_data.username}")
+        raise HTTPException(status_code=400, detail='用户名或密码错误')
+    ok = verify_password(form_data.password, str(user.hashed_password))
+    print(f"[LOGIN] 密码验证: username={user.username}, result={ok}, hash_prefix={str(user.hashed_password)[:20]}")
+    if not ok:
         raise HTTPException(status_code=400, detail='用户名或密码错误')
     access_token = create_access_token(data={'sub': user.username})
-    return TokenResponse(access_token=access_token, token_type='bearer', role=user.role)
+    return TokenResponse(access_token=access_token, token_type='bearer', role=user.role) # type: ignore
 
 
 @app.get('/api/auth/me', response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
     """获取当前登录用户信息"""
     return UserResponse(
-        id=current_user.id,
-        username=current_user.username,
-        role=current_user.role,
+        id=current_user.id, # type: ignore
+        username=current_user.username, # type: ignore
+        role=current_user.role, # type: ignore
         created_at=current_user.created_at.strftime('%Y-%m-%d %H:%M'),
     )
 
@@ -132,7 +143,7 @@ def get_me(current_user: User = Depends(get_current_user)):
 @app.post('/api/predict/blood-sugar', response_model=BloodSugarResponse)
 def api_predict_blood_sugar(request: BloodSugarRequest):
     """血糖预测接口"""
-    data = request.dict()
+    data = request.model_dump()
     result = predict_blood_sugar(data)
     return BloodSugarResponse(**result)
 
@@ -214,9 +225,9 @@ def get_history(
     )
     return [
         HistoryItem(
-            type=h.type,
-            input=json.loads(h.input_data),
-            result=json.loads(h.result),
+            type=h.type, # type: ignore
+            input=json.loads(h.input_data), # type: ignore
+            result=json.loads(h.result), # type: ignore
             created_at=h.created_at.strftime('%Y-%m-%d %H:%M'),
         )
         for h in history
@@ -271,7 +282,7 @@ def admin_dashboard(
             'user_id': h.user_id,
             'username': user_map.get(h.user_id, '未知'),
             'type': h.type,
-            'result': json.loads(h.result),
+            'result': json.loads(h.result), # type: ignore
             'created_at': h.created_at.strftime('%Y-%m-%d %H:%M'),
         }
         for h in history_rows
@@ -311,7 +322,7 @@ def admin_get_history(
             'user_id': h.user_id,
             'username': user_map.get(h.user_id, '未知'),
             'type': h.type,
-            'result': json.loads(h.result),
+            'result': json.loads(h.result), # type: ignore
             'created_at': h.created_at.strftime('%Y-%m-%d %H:%M'),
         }
         for h in history
@@ -345,7 +356,51 @@ async def realtime_stats(
 
 # ==================== 智能问答 ====================
 
-# 医疗健康知识库
+Google_API_KEY = os.getenv("Google_API_KEY", "")
+
+MEDICAL_SYSTEM_PROMPT = """你是一位专注于血糖与糖尿病领域的医疗健康助手，名字叫"健康助手"。
+你的职责是：
+1. 用通俗易懂的语言回答关于血糖、糖尿病、妊娠期糖尿病（GDM）、健康饮食、运动、体检指标等问题。
+2. 回答中要区分"普遍健康建议"和"医疗建议"，并提醒用户：本系统回答仅供参考，不能替代专业医生的诊断与治疗。
+3. 如果用户的问题与医疗健康无关，礼貌地引导回到健康话题。
+4. 回答要简洁、专业、有条理，尽量使用分点或短句。
+
+重要约束：
+- 不要只做问候或开场白，必须直接进入主题并给出完整回答。
+- 如果用户用"你好"、"在吗"等打招呼，也请自然带出健康建议，不要只回一句问候。
+- 优先使用分点、小标题或列表格式组织答案。"""
+
+
+def _call_google_chat(user_message: str) -> str:
+    """调用 Google Gemini 大模型进行对话，失败时返回 None"""
+    if not Google_API_KEY:
+        print("未配置 Google_API_KEY，跳过 AI 调用，使用知识库降级")
+        return ""  # type: ignore
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=Google_API_KEY,
+        )
+
+        response = client.chat.completions.create(
+            model="gemini-2.5-flash",
+            messages=[
+                {"role": "system", "content": MEDICAL_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.7,
+            max_tokens=1024,
+        )
+
+        return response.choices[0].message.content.strip() # type: ignore
+    except Exception as e:
+        print(f"调用 Google AI 失败: {e}")
+        return None # type: ignore
+
+
+# 医疗健康知识库（降级用）
 HEALTH_KNOWLEDGE = {
     "糖尿病预防": {
         "keywords": ["糖尿病", "预防", "预防糖尿病", "预防糖尿"],
@@ -377,21 +432,28 @@ HEALTH_KNOWLEDGE = {
     }
 }
 
+
 @app.post('/api/chat', response_model=ChatResponse)
 def api_chat(request: ChatRequest):
     """智能健康问答接口"""
-    user_message = request.message.strip().lower()
-    
-    # 关键词匹配
+    user_message = request.message.strip()
+
+    # 优先调用大模型
+    ai_reply = _call_google_chat(user_message)
+    if ai_reply:
+        return ChatResponse(reply=ai_reply)
+
+    # 降级：关键词匹配
+    lower_msg = user_message.lower()
     for category, info in HEALTH_KNOWLEDGE.items():
         for keyword in info["keywords"]:
-            if keyword in user_message:
+            if keyword in lower_msg:
                 return ChatResponse(reply=info["response"])
-    
+
     # 默认回复
     general_reply = f"""您好！我是您的健康助手。
 
-关于您的问题"{request.message}"，我建议您：
+关于您的问题"{user_message}"，我建议您：
 
 1. 可以尝试以下方向的问题：
    - 糖尿病预防
@@ -405,10 +467,109 @@ def api_chat(request: ChatRequest):
 2. 如果需要准确的健康建议，请咨询专业医生。
 
 3. 您也可以使用我们的【风险预测功能进行健康评估！"""
-    
+
     return ChatResponse(reply=general_reply)
 
 
+# ==================== 智能问答持久化 + SSE 流式 ====================
+
+@app.post('/api/chat/sessions')
+def create_chat_session(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """创建新会话"""
+    session = ChatSession(user_id=current_user.id, title="新对话")
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return {'id': session.id, 'title': session.title, 'created_at': session.created_at.strftime('%Y-%m-%d %H:%M')}
+
+
+@app.get('/api/chat/sessions')
+def list_chat_sessions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """获取会话列表"""
+    sessions = db.query(ChatSession).filter(ChatSession.user_id == current_user.id).order_by(ChatSession.updated_at.desc()).all()
+    return [{'id': s.id, 'title': s.title, 'created_at': s.created_at.strftime('%Y-%m-%d %H:%M'), 'updated_at': s.updated_at.strftime('%Y-%m-%d %H:%M')} for s in sessions]
+
+
+@app.get('/api/chat/sessions/{session_id}/messages')
+def get_chat_messages(session_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """获取会话消息"""
+    session = db.query(ChatSession).filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail='会话不存在')
+    messages = db.query(ChatMessage).filter(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at).all()
+    return [{'role': m.role, 'content': m.content, 'created_at': m.created_at.strftime('%H:%M')} for m in messages]
+
+
+async def _chat_stream_generator(session_id, user_message: str, db: Session):
+    """SSE 流式聊天生成器"""
+    # 保存用户消息
+    user_msg = ChatMessage(session_id=session_id, role='user', content=user_message)
+    db.add(user_msg)
+    db.commit()
+
+    # 调用 Gemini 流式 API
+    full_reply = ""
+    try:
+        from openai import OpenAI
+        client = OpenAI(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=Google_API_KEY,
+        )
+        stream = client.chat.completions.create(
+            model="gemini-2.5-flash",
+            messages=[
+                {"role": "system", "content": MEDICAL_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.7,
+            max_tokens=1024,
+            stream=True,
+        )
+
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                full_reply += content
+                yield f"data: {json.dumps({'content': content}, ensure_ascii=False)}\n\n"
+    except Exception as e:
+        print(f"调用 Google AI 失败: {e}")
+        full_reply = "抱歉，发生了错误，请稍后再试。"
+        yield f"data: {json.dumps({'content': full_reply}, ensure_ascii=False)}\n\n"
+
+    # 保存 AI 回复
+    ai_msg = ChatMessage(session_id=session_id, role='assistant', content=full_reply)
+    db.add(ai_msg)
+    session_obj = db.query(ChatSession).filter(ChatSession.id == int(session_id)).first()
+    if session_obj and str(session_obj.title) == "新对话":
+        session_obj.title = user_message[:20] + ("..." if len(user_message) > 20 else "")
+        db.add(session_obj)
+    db.commit()
+
+    yield f"data: [DONE]\n\n"
+
+
+@app.post('/api/chat/stream')
+async def api_chat_stream(request: ChatRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """SSE 流式聊天接口"""
+    data = request.model_dump()
+    session_id = data.get('session_id')
+    user_message = data.get('message', '').strip()
+
+    if not session_id:
+        session = ChatSession(user_id=current_user.id, title="新对话")
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        session_id = session.id
+    else:
+        session_id = session_id
+
+    return StreamingResponse(
+        _chat_stream_generator(session_id, user_message, db),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive'},
+    )
+
+
 if __name__ == '__main__':
-    import uvicorn
     uvicorn.run(app, host='0.0.0.0', port=8000)

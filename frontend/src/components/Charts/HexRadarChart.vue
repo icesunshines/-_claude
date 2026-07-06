@@ -44,9 +44,10 @@ function initChart() {
       textStyle: { color: '#334155' },
       extraCssText: 'box-shadow: 0 4px 16px rgba(0,0,0,0.1); border-radius: 12px;',
       formatter: (params) => {
+        const value = typeof params.value === 'number' ? params.value : parseFloat(params.value)
         return `<div style="padding: 4px 8px;">
           <div style="font-weight: bold; margin-bottom: 4px;">${params.name}</div>
-          <div style="color: #8b5cf6;">得分：${params.value.toFixed(1)}</div>
+          <div style="color: #8b5cf6;">得分：${Number.isFinite(value) ? value.toFixed(1) : '--'}</div>
         </div>`
       }
     },
