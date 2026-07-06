@@ -391,14 +391,14 @@ async function deleteSession(sessionId) {
         >
           <!-- 空状态占位 -->
           <div v-if="!messages.length && !loading" class="h-full min-h-0 flex items-center justify-center">
-            <div class="text-center text-slate-400">
-              <div class="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                <el-icon :size="32" class="text-primary-400">
+            <div class="text-center">
+              <div class="w-20 h-20 bg-gradient-to-br from-primary-50 to-medical-50 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-soft">
+                <el-icon :size="36" class="text-primary-500">
                   <ChatDotRound />
                 </el-icon>
               </div>
-              <p class="text-base font-medium text-slate-600 mb-1">开始对话</p>
-              <p class="text-xs text-slate-400 max-w-xs leading-relaxed">
+              <p class="text-base font-semibold text-slate-700 mb-1">开始对话</p>
+              <p class="text-sm text-slate-400 max-w-xs leading-relaxed">
                 请选择左侧会话或直接提问，<br/>我将基于医疗知识库为您解答健康问题。
               </p>
             </div>
